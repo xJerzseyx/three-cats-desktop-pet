@@ -6,6 +6,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle(ThreeCats.Program.AppName)]
 [assembly: AssemblyProduct(ThreeCats.Program.AppName)]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace ThreeCats
 {
@@ -14,8 +15,14 @@ namespace ThreeCats
         internal const string AppName = "伊二三万";
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            if (args.Length == 1 && args[0] == CursorSession.WorkerArgument)
+            {
+                CursorSession.RunWorker();
+                return;
+            }
+
             bool first;
             using (var mutex = new Mutex(true, "Local\\ThreeCatsDesktopPet.v1", out first))
             {
@@ -29,7 +36,8 @@ namespace ThreeCats
                     Native.EnableDpi();
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    Application.Run(new PetForm(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "三猫桌宠设置.xml")));
+                    using (var pet = new PetForm(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "三猫桌宠设置.xml")))
+                        Application.Run(pet);
                 }
                 catch (Exception exception)
                 {

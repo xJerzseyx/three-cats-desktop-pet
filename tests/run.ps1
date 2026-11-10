@@ -41,6 +41,13 @@ try {
     & (Join-Path $testDirectory 'IntegrationTests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }
 
+    & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/CursorTests.exe" /r:System.IO.Compression.dll "/resource:$repoRoot/assets/cursors.zip,ThreeCats.Cursors.zip" (Join-Path $PSScriptRoot 'CursorTests.cs') (Join-Path $repoRoot 'src/CursorScheme.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Cursor test compilation failed.' }
+    $cursorTestArgs = @()
+    if ($IncludeStartup) { $cursorTestArgs = @('--include-registry') }
+    & (Join-Path $testDirectory 'CursorTests.exe') @cursorTestArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Cursor tests failed.' }
+
     if ($IncludeStartup) {
         & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/StartupTests.exe" (Join-Path $PSScriptRoot 'StartupTests.cs') (Join-Path $repoRoot 'src/StartupRegistration.cs')
         if ($LASTEXITCODE -ne 0) { throw 'Startup test compilation failed.' }

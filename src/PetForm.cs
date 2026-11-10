@@ -22,6 +22,8 @@ namespace ThreeCats
         private readonly ToolStripMenuItem visibility;
         private readonly ToolStripMenuItem status;
         private readonly ToolStripMenuItem autoStart;
+        private readonly ToolStripMenuItem cursorMenu = new ToolStripMenuItem("全局光标");
+        private readonly CursorSession cursorSession = new CursorSession();
         private readonly StartupRegistration startup = new StartupRegistration();
         private readonly double[] lookX = new double[3];
         private readonly double[] lookY = new double[3];
@@ -66,6 +68,12 @@ namespace ThreeCats
             sizes.DropDownItems.Add("放大", null, delegate { ResizePet((int)(Width * 1.12)); });
             sizes.DropDownItems.Add("缩小", null, delegate { ResizePet((int)(Width / 1.12)); });
             menu.Items.Add(sizes);
+            AddCursorChoice("逗猫棒", "wand");
+            AddCursorChoice("猫条", "treat");
+            AddCursorChoice("猫薄荷", "catnip");
+            cursorMenu.DropDownItems.Add(new ToolStripSeparator());
+            AddCursorChoice("关闭并恢复原光标", "off");
+            menu.Items.Add(cursorMenu);
             menu.Items.Add("音乐来源设置…", null, delegate { ChoosePlayers(); });
             autoStart = new ToolStripMenuItem("开机自启动", null, delegate { ToggleAutoStart(); });
             menu.Items.Add(autoStart);
@@ -84,7 +92,13 @@ namespace ThreeCats
             tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ToggleVisibility(); };
             RefreshAutoStart();
             timer.Tick += delegate { TickAnimation(); };
-            Shown += delegate { lastTime = clock.Elapsed.TotalSeconds; timer.Start(); };
+            Shown += delegate
+            {
+                SelectCursor(settings.CursorTheme == "off" || CursorScheme.IsTheme(settings.CursorTheme)
+                    ? settings.CursorTheme : "wand", false);
+                lastTime = clock.Elapsed.TotalSeconds;
+                timer.Start();
+            };
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
         }
 
@@ -257,6 +271,35 @@ namespace ThreeCats
             }
         }
 
+        private void AddCursorChoice(string label, string theme)
+        {
+            var item = new ToolStripMenuItem(label, null, delegate { SelectCursor(theme, true); }) { Tag = theme };
+            cursorMenu.DropDownItems.Add(item);
+        }
+
+        private void SelectCursor(string theme, bool save)
+        {
+            try
+            {
+                cursorSession.Select(theme);
+                settings.CursorTheme = theme;
+                if (save) SaveSettings();
+            }
+            catch (Exception exception)
+            {
+                if (!CursorSession.IsCursorError(exception)) throw;
+                theme = "off";
+                if (save && settings.CursorTheme != "off")
+                {
+                    settings.CursorTheme = "off";
+                    SaveSettings();
+                }
+                tray.ShowBalloonTip(5000, "无法切换全局光标", "Windows 未能完成光标操作。请在鼠标设置中检查当前方案。", ToolTipIcon.Info);
+            }
+            foreach (var item in cursorMenu.DropDownItems.OfType<ToolStripMenuItem>())
+                item.Checked = (string)item.Tag == theme;
+        }
+
         private void SaveSettings()
         {
             settings.Width = Width;
@@ -317,6 +360,7 @@ namespace ThreeCats
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            cursorSession.Dispose();
             timer.Stop();
             SaveSettings();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
@@ -328,6 +372,12 @@ namespace ThreeCats
             audio.Dispose();
             renderer.Dispose();
             base.OnFormClosed(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) cursorSession.Dispose();
+            base.Dispose(disposing);
         }
     }
 }

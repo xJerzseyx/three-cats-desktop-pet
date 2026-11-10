@@ -20,6 +20,7 @@ class LogicTests
     {
         Check(PlayerNames.Normalize(" QQMusic.EXE ") == "qqmusic", "process names ignore case and extension");
         var names = PlayerNames.Parse("QQMusic.exe, cloudmusic；foobar2000\nQQMusic.exe");
+        Check(new Settings().CursorTheme == "wand", "legacy and new settings default to the wand cursor theme");
         Check(names.Count == 3 && names.Contains("foobar2000"), "player list handles Chinese punctuation and duplicates");
         Check(!names.Contains("chrome"), "unselected process excluded");
         Check(PlayerNames.Normalize("\"C:\\Music\\foobar2000.exe\"") == "foobar2000", "quoted copied EXE path accepted");

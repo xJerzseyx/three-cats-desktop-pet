@@ -67,6 +67,7 @@ class IntegrationTests
             Console.WriteLine("Renderer average: " + (watch.ElapsedMilliseconds / 34.0).ToString("F2") + " ms per 600px frame");
         }
         string configPath = Path.GetFullPath("work/integration-settings-" + Guid.NewGuid().ToString("N") + ".xml");
+        new Settings { CursorTheme = "off" }.Save(configPath);
         using (var pet = new PetForm(configPath))
         {
             pet.Show();
@@ -76,6 +77,11 @@ class IntegrationTests
             Check(pet.Width == 300 && pet.Height == 150, "first launch window uses 50 percent size");
             var menu = (ContextMenuStrip)typeof(PetForm).GetField("menu", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(pet);
             Check(menu.Items.OfType<ToolStripMenuItem>().Any(item => item.Text == "开机自启动"), "tray provides optional startup toggle");
+            var cursorMenu = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "全局光标");
+            var cursorChoices = cursorMenu.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
+            Check(cursorChoices.Select(item => item.Text).SequenceEqual(new[] { "逗猫棒", "猫条", "猫薄荷", "关闭并恢复原光标" }),
+                "tray provides all three global themes and an off option");
+            Check(cursorChoices.Single(item => item.Checked).Text == "关闭并恢复原光标", "saved off choice stays selected at startup");
             pet.ResizePet(720);
             Pump(100);
             Check(pet.Width == 720 && pet.Height == 360, "resize retains group aspect ratio");

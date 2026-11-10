@@ -63,6 +63,7 @@ namespace ThreeCats
         public int X = int.MinValue;
         public int Y = int.MinValue;
         public string Players = "cloudmusic,qqmusic";
+        public string CursorTheme = "wand";
 
         public static Settings Load(string path)
         {
