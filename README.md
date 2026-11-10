@@ -1,4 +1,4 @@
-# 三猫桌宠
+# 伊二三万
 
 免安装的 Windows 像素风桌宠。三只猫并排坐着，一起移动、缩放，并随选定音乐播放器的声音点头摇摆。
 
@@ -6,7 +6,7 @@
 
 ## 下载与运行
 
-前往 [Releases](https://github.com/xJerzseyx/three-cats-desktop-pet/releases/latest) 下载绿色 ZIP，解压后运行 `三猫桌宠.exe`。
+前往 [Releases](https://github.com/xJerzseyx/three-cats-desktop-pet/releases/latest) 下载绿色 ZIP，解压后按包内使用说明运行。
 
 适用 Windows 10 / 11 的 64 位系统，使用 Windows 自带的 .NET Framework 4.x。更新时先通过旧版托盘菜单退出，再运行新版。
 
@@ -36,7 +36,7 @@
 .\build.ps1
 ```
 
-构建使用系统目录中的 .NET Framework C# 编译器，产物位于 `artifacts/`。最终猫咪 PNG 作为资源内嵌在 EXE 中。
+构建使用系统目录中的 .NET Framework C# 编译器，生成 `artifacts/伊二三万.exe`。最终猫咪 PNG 作为资源内嵌在 EXE 中。
 
 ## 运行测试
 

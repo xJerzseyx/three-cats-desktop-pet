@@ -7,7 +7,7 @@ $sourceFiles = @('Model.cs', 'AudioMonitor.cs', 'SpriteRenderer.cs', 'Native.cs'
 $sourcePaths = $sourceFiles | ForEach-Object { Join-Path (Join-Path $PSScriptRoot 'src') $_ }
 $assetPath = Join-Path $PSScriptRoot 'assets/cats.png'
 $manifestPath = Join-Path $PSScriptRoot 'src/app.manifest'
-$executablePath = Join-Path $OutputDirectory '三猫桌宠.exe'
+$executablePath = Join-Path $OutputDirectory '伊二三万.exe'
 & $compiler /nologo /utf8output /target:winexe /platform:x64 /optimize+ /unsafe- "/out:$executablePath" "/win32manifest:$manifestPath" /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Core.dll "/resource:$assetPath,ThreeCats.Cats.png" @sourcePaths
 if ($LASTEXITCODE -ne 0) { throw 'EXE build failed.' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'USAGE.zh-CN.txt') -Destination (Join-Path $OutputDirectory '使用说明.txt')

@@ -17,17 +17,17 @@ class StartupTests
         {
             var startup = new StartupRegistration(path);
             Check(!startup.IsEnabled, "startup defaults off without registration");
-            startup.SetEnabled(true, "C:\\Music Pets\\三猫桌宠.exe");
+            startup.SetEnabled(true, "C:\\Music Pets\\伊二三万.exe");
             Check(startup.IsEnabled, "startup can be enabled");
             using (var key = Registry.CurrentUser.OpenSubKey(path, true))
             {
-                Check((string)key.GetValue(StartupRegistration.ValueName) == "\"C:\\Music Pets\\三猫桌宠.exe\"", "startup command quotes paths with spaces");
+                Check((string)key.GetValue(StartupRegistration.ValueName) == "\"C:\\Music Pets\\伊二三万.exe\"", "startup command quotes paths with spaces");
                 key.SetValue("UnrelatedSetting", "retained");
             }
-            startup.SetEnabled(true, "D:\\Pets\\三猫桌宠.exe");
+            startup.SetEnabled(true, "D:\\Pets\\伊二三万.exe");
             using (var key = Registry.CurrentUser.OpenSubKey(path))
-                Check((string)key.GetValue(StartupRegistration.ValueName) == "\"D:\\Pets\\三猫桌宠.exe\"", "startup path can follow moved portable executable");
-            startup.SetEnabled(false, "D:\\Pets\\三猫桌宠.exe");
+                Check((string)key.GetValue(StartupRegistration.ValueName) == "\"D:\\Pets\\伊二三万.exe\"", "startup path can follow moved portable executable");
+            startup.SetEnabled(false, "D:\\Pets\\伊二三万.exe");
             Check(!startup.IsEnabled, "startup can be disabled");
             using (var key = Registry.CurrentUser.OpenSubKey(path))
                 Check((string)key.GetValue("UnrelatedSetting") == "retained", "disabling startup only removes owned value");

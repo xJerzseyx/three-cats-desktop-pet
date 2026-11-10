@@ -1,12 +1,18 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
+
+[assembly: AssemblyTitle(ThreeCats.Program.AppName)]
+[assembly: AssemblyProduct(ThreeCats.Program.AppName)]
 
 namespace ThreeCats
 {
     static class Program
     {
+        internal const string AppName = "伊二三万";
+
         [STAThread]
         static void Main()
         {
@@ -27,7 +33,7 @@ namespace ThreeCats
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show("桌宠启动或运行遇到问题。\n\n" + exception.Message, "三猫桌宠", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("桌宠启动或运行遇到问题。\n\n" + exception.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally { mutex.ReleaseMutex(); }
             }

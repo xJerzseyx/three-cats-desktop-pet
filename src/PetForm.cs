@@ -39,7 +39,7 @@ namespace ThreeCats
             settingsPath = configPath;
             settings = Settings.Load(configPath);
             audio.Selected = PlayerNames.Parse(settings.Players);
-            Text = "三猫桌宠";
+            Text = Program.AppName;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -80,7 +80,7 @@ namespace ThreeCats
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("左键拖动 · 滚轮缩放", null, delegate { }) .Enabled = false;
             menu.Items.Add("退出程序", null, delegate { Close(); });
-            tray = new NotifyIcon { Text = "三猫桌宠", Icon = MakeIcon(), ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Text = Program.AppName, Icon = MakeIcon(), ContextMenuStrip = menu, Visible = true };
             tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ToggleVisibility(); };
             RefreshAutoStart();
             timer.Tick += delegate { TickAnimation(); };

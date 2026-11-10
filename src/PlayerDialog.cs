@@ -16,7 +16,7 @@ namespace ThreeCats
         public PlayerDialog(AudioMonitor monitor, string current)
         {
             audio = monitor;
-            Text = "三猫桌宠 · 音乐来源";
+            Text = Program.AppName + " · 音乐来源";
             ClientSize = new Size(570, 485);
             Font = new Font("Microsoft YaHei UI", 9);
             AutoScaleMode = AutoScaleMode.Dpi;

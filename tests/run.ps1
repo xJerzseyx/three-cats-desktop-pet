@@ -36,7 +36,7 @@ try {
         }
     } finally { $writer.Dispose() }
 
-    & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/IntegrationTests.exe" /r:System.Drawing.dll /r:System.Windows.Forms.dll "/r:$testDirectory/三猫桌宠.exe" (Join-Path $PSScriptRoot 'IntegrationTests.cs')
+    & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/IntegrationTests.exe" /r:System.Drawing.dll /r:System.Windows.Forms.dll "/r:$testDirectory/伊二三万.exe" (Join-Path $PSScriptRoot 'IntegrationTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Integration test compilation failed.' }
     & (Join-Path $testDirectory 'IntegrationTests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }

@@ -90,7 +90,7 @@ class IntegrationTests
             {
                 closeDialog.Tick += delegate
                 {
-                    var dialog = Application.OpenForms.Cast<Form>().FirstOrDefault(form => form.Text == "三猫桌宠 · 音乐来源");
+                    var dialog = Application.OpenForms.Cast<Form>().FirstOrDefault(form => form.Text == "伊二三万 · 音乐来源");
                     if (dialog == null) return;
                     ownedDialog = object.ReferenceEquals(dialog.Owner, pet);
                     dialog.DialogResult = DialogResult.Cancel;
