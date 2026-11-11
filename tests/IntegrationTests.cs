@@ -56,6 +56,13 @@ class IntegrationTests
         return (CatLayout)typeof(PetForm).GetField("layout", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(pet);
     }
 
+    static PetForm CreatePet(string configPath)
+    {
+        var constructor = typeof(PetForm).GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
+            null, new[] { typeof(string), typeof(Random), typeof(Func<DateTime>) }, null);
+        return (PetForm)constructor.Invoke(new object[] { configPath, new Random(), (Func<DateTime>)(() => new DateTime(2026, 11, 12)) });
+    }
+
     static void Mouse(CatWindow cat, string method, Point screenPoint)
     {
         Point local = cat.PointToClient(screenPoint);
@@ -109,7 +116,7 @@ class IntegrationTests
         string configPath = Path.GetFullPath("work/integration-settings-" + Guid.NewGuid().ToString("N") + ".xml");
         new Settings { CursorTheme = "off" }.Save(configPath);
         CatLayout expectedLayout;
-        using (var pet = new PetForm(configPath))
+        using (var pet = CreatePet(configPath))
         {
             pet.Show();
             Pump(900);
@@ -214,7 +221,7 @@ class IntegrationTests
             Check(Layout(pet).Queue.Count == 0 && Layout(pet).Anchor == anchor && !preview.Visible,
                 "all cats can leave while the original queue target is retained without an idle marker");
             CatLayout allDetached = Layout(pet).Copy();
-            using (var emptyRestart = new PetForm(configPath))
+            using (var emptyRestart = CreatePet(configPath))
             {
                 emptyRestart.Show();
                 Pump(100);
@@ -269,7 +276,7 @@ class IntegrationTests
             Pump(50);
         }
         Check(Settings.Load(configPath).Width == 720, "window size persisted on exit");
-        using (var restarted = new PetForm(configPath))
+        using (var restarted = CreatePet(configPath))
         {
             restarted.Show();
             Pump(100);

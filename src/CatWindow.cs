@@ -42,24 +42,30 @@ namespace ThreeCats
             if (message.Msg == 0x02E0 && ScreenChanged != null) ScreenChanged();
         }
 
-        internal void Place(Point foot, int groupWidth, bool daily = false, bool lifted = false)
+        internal void Place(Point foot, int groupWidth, bool expanded, Costume costume)
         {
-            bool expanded = daily || lifted;
             Size frameSize = expanded ? DailyRenderer.FrameSize(groupWidth) : SpriteRenderer.CatFrameSize(groupWidth);
             Point offset = expanded ? DailyRenderer.FootOffset(groupWidth) : SpriteRenderer.CatFootOffset(groupWidth);
-            var position = new Point(foot.X - offset.X, foot.Y - offset.Y);
+            int padding = CostumeRenderer.Padding(groupWidth, costume);
+            frameSize.Width += padding * 2;
+            frameSize.Height += padding * 2;
+            var position = new Point(foot.X - offset.X - padding, foot.Y - offset.Y - padding);
             if (Size != frameSize) Size = frameSize;
             if (Location != position) Location = position;
         }
 
         internal void Animate(Point cursor, int groupWidth, double elapsed, double musicMix, double energy, double time,
-            DailyRoutine routine = null, DailyRenderer dailyRenderer = null, LiftRenderer liftRenderer = null)
+            DailyRoutine routine, DailyRenderer dailyRenderer, LiftRenderer liftRenderer,
+            SpineDragon spineDragon, SpineDragonRenderer spineDragonRenderer, Costume costume, CostumeRenderer costumeRenderer)
         {
             if (!Visible) return;
-            bool daily = routine != null && routine.ActiveCat == CatId;
+            bool daily = routine.ActiveCat == CatId;
+            bool dragon = spineDragon.ActiveCat == CatId;
             Size idleSize = SpriteRenderer.CatFrameSize(groupWidth);
             Point idleOffset = SpriteRenderer.CatFootOffset(groupWidth);
-            Point offset = daily ? DailyRenderer.FootOffset(groupWidth) : idleOffset;
+            Point offset = daily || dragon || liftRenderer != null ? DailyRenderer.FootOffset(groupWidth) : idleOffset;
+            int padding = CostumeRenderer.Padding(groupWidth, costume);
+            offset.Offset(padding, padding);
             double desiredX = Math.Max(-1, Math.Min(1, (cursor.X - Left - offset.X) / Math.Max(160, groupWidth * 0.55)));
             double headY = Top + offset.Y - idleOffset.Y + idleSize.Height * 0.29;
             double desiredY = Math.Max(-1, Math.Min(1, (cursor.Y - headY) / Math.Max(130, idleSize.Height * 0.8)));
@@ -68,7 +74,21 @@ namespace ThreeCats
             Bitmap frame;
             if (liftRenderer != null) frame = liftRenderer.Render(CatId, groupWidth);
             else if (daily) frame = dailyRenderer.Render(renderer, CatId, groupWidth, lookX, lookY, musicMix, energy, time, routine);
+            else if (dragon)
+            {
+                Bitmap idle = spineDragon.Recovery > 0
+                    ? renderer.RenderCat(CatId, groupWidth, lookX, lookY, musicMix, energy, time) : null;
+                frame = spineDragonRenderer.Render(CatId, groupWidth, spineDragon, idle);
+            }
             else frame = renderer.RenderCat(CatId, groupWidth, lookX, lookY, musicMix, energy, time);
+            if (costume != Costume.None)
+            {
+                CostumePose pose = SpriteRenderer.GetCostumePose(CatId, groupWidth, lookX, lookY, musicMix, energy, time);
+                if (liftRenderer != null) pose = liftRenderer.GetCostumePose(CatId, groupWidth);
+                else if (daily) pose = dailyRenderer.GetCostumePose(CatId, groupWidth, routine, pose);
+                else if (dragon) pose = spineDragonRenderer.GetCostumePose(CatId, groupWidth, spineDragon, pose);
+                frame = costumeRenderer.Render(CatId, frame, groupWidth, costume, pose);
+            }
             Native.Present(Handle, frame, Location);
         }
 

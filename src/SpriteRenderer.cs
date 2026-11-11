@@ -49,6 +49,53 @@ namespace ThreeCats
             return new Point((int)Math.Round(groupWidth * 425.0 / 1774), (int)Math.Round(groupWidth * 825.0 / 1774));
         }
 
+        private static double BodyAngle(double musicMix, double energy, double time)
+        {
+            return Math.Sin(time * 3.5) * (.008 + energy * .014) * musicMix;
+        }
+
+        private static double HeadAngle(double horizontal, double musicMix, double energy, double time)
+        {
+            return horizontal * .065 * (1 - musicMix) + Math.Sin(time * 3.5) * (.025 + energy * .055) * musicMix;
+        }
+
+        private static double HeadOffsetY(double vertical, double musicMix, double energy, double time)
+        {
+            return vertical * 9 * (1 - musicMix) + Math.Sin(time * 7) * (3 + energy * 13) * musicMix;
+        }
+
+        private static double HeadBlend(double y)
+        {
+            double blend = Math.Max(0, Math.Min(1, (480 - y) / 155.0));
+            return blend * blend * (3 - 2 * blend);
+        }
+
+        internal static CostumePose GetCostumePose(int cat, int width, double horizontal, double vertical,
+            double musicMix, double energy, double time)
+        {
+            double body = BodyAngle(musicMix, energy, time);
+            double head = HeadAngle(horizontal, musicMix, energy, time);
+            double x = horizontal * 13 * (1 - musicMix);
+            double y = HeadOffsetY(vertical, musicMix, energy, time);
+            double crownY = cat == 2 ? 145 : 135;
+            double neckY = cat == 0 ? 360 : cat == 1 ? 391 : 370;
+            double scale = width / 1774.0;
+            return new CostumePose(WarpLandmark(crownY, x, y, head, body, scale),
+                WarpLandmark(neckY, x, y, head, body, scale), (float)((body + head) * 180 / Math.PI),
+                width / 600f * (cat == 1 ? 1.06f : cat == 2 ? .96f : 1f));
+        }
+
+        private static PointF WarpLandmark(double y, double offsetX, double offsetY, double head, double body, double scale)
+        {
+            // The sprite uses the inverse of this transform to sample the face.
+            double blend = HeadBlend(y);
+            double angle = head * blend;
+            double x = offsetX * blend - Math.Sin(angle) * (y - 335);
+            double relativeY = 335 + offsetY * blend + Math.Cos(angle) * (y - 335) - 825;
+            return new PointF((float)((425 + Math.Cos(body) * x - Math.Sin(body) * relativeY) * scale),
+                (float)((825 + Math.Sin(body) * x + Math.Cos(body) * relativeY) * scale));
+        }
+
         public Bitmap RenderCat(int cat, int groupWidth, double horizontal, double vertical, double musicMix, double energy, double time)
         {
             if (cat < 0 || cat >= 3) throw new ArgumentOutOfRangeException("cat");
@@ -71,15 +118,13 @@ namespace ThreeCats
             Array.Clear(pixels, 0, pixels.Length);
 
             // A continuous inverse warp bends the neck without exposing a layer seam.
-            double sway = Math.Sin(time * 3.5) * (0.008 + energy * 0.014) * musicMix;
-            double nod = Math.Sin(time * 7.0) * (3 + energy * 13) * musicMix;
+            double sway = BodyAngle(musicMix, energy, time);
             for (int cat = firstCat; cat < endCat; cat++)
             {
                 double center = centers[cat];
-                double headAngle = horizontal[cat] * 0.065 * (1 - musicMix)
-                    + Math.Sin(time * 3.5) * (0.025 + energy * 0.055) * musicMix;
+                double headAngle = HeadAngle(horizontal[cat], musicMix, energy, time);
                 double offsetX = horizontal[cat] * 13 * (1 - musicMix);
-                double offsetY = vertical[cat] * 9 * (1 - musicMix) + nod;
+                double offsetY = HeadOffsetY(vertical[cat], musicMix, energy, time);
                 double bodyCos = Math.Cos(sway);
                 double bodySin = Math.Sin(sway);
                 int fromX = Math.Max(0, (int)((edges[cat] - 28 - originX) * scale));
@@ -87,8 +132,7 @@ namespace ThreeCats
                 for (int y = 0; y < height; y++)
                 {
                     double sourceY = (y + 0.5) / scale;
-                    double blend = Math.Max(0, Math.Min(1, (480 - sourceY) / 155.0));
-                    blend = blend * blend * (3 - 2 * blend);
+                    double blend = HeadBlend(sourceY);
                     double cosine = Math.Cos(headAngle * blend);
                     double sine = Math.Sin(headAngle * blend);
                     for (int x = fromX; x < toX; x++)

@@ -46,10 +46,24 @@ namespace ThreeCats
             return groupWidth * 1.22 / 1774;
         }
 
+        private static RectangleF ArtworkTarget(int cat, int groupWidth, Bitmap artwork)
+        {
+            double scale = Scale(groupWidth);
+            Point grip = GripOffset(cat, groupWidth);
+            return new RectangleF((float)(grip.X - grips[cat].X * scale), (float)(grip.Y - grips[cat].Y * scale),
+                (float)(artwork.Width / 3 * scale), (float)(artwork.Height * scale));
+        }
+
+        internal CostumePose GetCostumePose(int cat, int groupWidth)
+        {
+            return CostumeLandmarks.Lift[cat].Project(ArtworkTarget(cat, groupWidth, cat == 2 ? graySource : source),
+                240, 240, groupWidth, false);
+        }
+
         public Bitmap Render(int cat, int groupWidth)
         {
             if (cat < 0 || cat >= 3) throw new ArgumentOutOfRangeException("cat");
-            double scale = Scale(groupWidth);
+            if (groupWidth < 1) throw new ArgumentOutOfRangeException("groupWidth");
             if (renderedWidth != groupWidth)
             {
                 foreach (var frame in frames) if (frame != null) frame.Dispose();
@@ -59,11 +73,9 @@ namespace ThreeCats
             if (frames[cat] != null) return frames[cat];
             Size size = FrameSize(groupWidth);
             var rendered = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
-            Point grip = GripOffset(cat, groupWidth);
             Bitmap artwork = cat == 2 ? graySource : source;
             int cellWidth = artwork.Width / 3;
-            var target = new RectangleF((float)(grip.X - grips[cat].X * scale),
-                (float)(grip.Y - grips[cat].Y * scale), (float)(cellWidth * scale), (float)(artwork.Height * scale));
+            var target = ArtworkTarget(cat, groupWidth, artwork);
             using (var graphics = Graphics.FromImage(rendered))
             {
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;

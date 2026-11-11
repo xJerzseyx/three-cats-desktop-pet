@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -16,6 +18,12 @@ namespace ThreeCats
         private readonly CatLayout layout;
         private readonly DailyRoutine daily;
         private readonly DailyRenderer dailyRenderer;
+        private readonly SpineDragon spineDragon;
+        private readonly SpineDragonRenderer spineDragonRenderer = new SpineDragonRenderer();
+        private readonly CostumeRenderer costumeRenderer = new CostumeRenderer();
+        private readonly GreetingWindow greeting = new GreetingWindow();
+        private readonly Func<DateTime> localDate;
+        private readonly HashSet<string> seenGreetingDates;
         private readonly LiftRenderer liftRenderer = new LiftRenderer();
         private readonly BowlWindow bowl = new BowlWindow();
         private readonly QueuePreview preview = new QueuePreview();
@@ -35,6 +43,8 @@ namespace ThreeCats
         private double musicMix;
         private double nextStatus;
         private CatDrag drag;
+        private CelebrationDay celebration;
+        private DateTime currentDate;
         private bool saveWarningShown;
         private static readonly string[] routineNames = { "", "伸懒腰", "打滚", "喝水", "吃饭" };
         internal static readonly uint ShowMessage = Native.RegisterWindowMessage("ThreeCatsDesktop.Show.v1");
@@ -45,7 +55,7 @@ namespace ThreeCats
             internal Point Origin;
             internal Point CatOrigin;
             internal CatLayout Snapshot;
-            internal bool GrabbedRoutine;
+            internal bool HasTemporaryOrigin;
             internal bool InterruptedRoutine;
             internal bool Group;
             internal bool Started;
@@ -54,12 +64,17 @@ namespace ThreeCats
 
         public PetForm(string configPath) : this(configPath, new Random()) { }
 
-        internal PetForm(string configPath, Random random) : base(0)
+        internal PetForm(string configPath, Random random) : this(configPath, random, () => DateTime.Today) { }
+
+        internal PetForm(string configPath, Random random, Func<DateTime> localDate) : base(0)
         {
             daily = new DailyRoutine(random);
             dailyRenderer = new DailyRenderer();
+            spineDragon = new SpineDragon(random);
             settingsPath = configPath;
             settings = Settings.Load(configPath);
+            this.localDate = localDate;
+            seenGreetingDates = new HashSet<string>(settings.SeenGreetingDates ?? new string[0], StringComparer.Ordinal);
             audio.Selected = PlayerNames.Parse(settings.Players);
             var area = Screen.PrimaryScreen.WorkingArea;
             var legacyLocation = settings.X == int.MinValue || settings.Y == int.MinValue
@@ -72,11 +87,12 @@ namespace ThreeCats
             foreach (var cat in cats)
             {
                 cat.MouseDown += CatMouseDown;
+                cat.MouseEnter += CatMouseEnter;
                 cat.MouseMove += CatMouseMove;
                 cat.MouseUp += CatMouseUp;
                 cat.MouseCaptureChanged += CatCaptureChanged;
                 cat.MouseWheel += CatMouseWheel;
-                cat.ScreenChanged += delegate { CancelDrag(); StopRoutine(); FitToScreen(); };
+                cat.ScreenChanged += delegate { CancelDrag(); StopActions(); FitToScreen(); };
             }
             FitToScreen();
             status = new ToolStripMenuItem("正在检测音乐…") { Enabled = false };
@@ -167,13 +183,17 @@ namespace ThreeCats
             // Hidden pets sleep. Reshowing refreshes the selected audio sessions.
             if (!Visible) return;
             if (drag != null && (Native.GetAsyncKeyState(0x1b) & 0x8000) != 0) CancelDrag();
+            bool menusClosed = !menu.Visible && !OwnedForms.Any(form => form.Visible);
+            UpdateCelebration(now, menusClosed && drag == null);
             motion.Update(audio.ReadPeak(), elapsed);
             musicMix += ((motion.Playing ? 1 : 0) - musicMix) * (1 - Math.Exp(-elapsed * 9));
-            daily.Update(elapsed, layout, GetBowlPosition(), drag == null && !menu.Visible && !OwnedForms.Any(form => form.Visible));
+            spineDragon.Advance(elapsed);
+            daily.Update(elapsed, layout, GetBowlPosition(), spineDragon.ActiveCat < 0 && drag == null && menusClosed);
             var cursor = Cursor.Position;
             ApplyLayout();
             foreach (var cat in cats)
-                cat.Animate(cursor, layout.Width, elapsed, musicMix, motion.Energy, now, daily, dailyRenderer, IsLifted(cat) ? liftRenderer : null);
+                cat.Animate(cursor, layout.Width, elapsed, musicMix, motion.Energy, now, daily, dailyRenderer,
+                    IsLifted(cat) ? liftRenderer : null, spineDragon, spineDragonRenderer, celebration.Costume, costumeRenderer);
             if (daily.BowlVisible)
             {
                 bowl.ShowMeal(daily.Kind, daily.BowlPosition, layout.Width);
@@ -182,15 +202,24 @@ namespace ThreeCats
             else bowl.Hide();
             if (drag != null && drag.Started && !drag.Group)
                 preview.ShowTarget(layout, drag.Window.CatId, drag.CanReturn, musicMix, motion.Energy, now);
+            if (greeting.IsPlaying)
+            {
+                var queue = layout.Queue;
+                int centerCat = queue.Count == 0 ? 0 : queue[queue.Count / 2];
+                greeting.Present(now, BoundsAt(layout.PositionOf(centerCat)));
+            }
             if (now > nextStatus)
             {
                 status.Text = !audio.Available ? (audio.Error ?? "等待音频设备") : motion.Playing ? "音乐播放中 · 同步摇摆" : "等待音乐 · 头部跟随鼠标";
                 if (daily.ActiveCat >= 0) status.Text = "猫咪日常 · " + routineNames[(int)daily.Kind];
-                if (!menu.Visible && !OwnedForms.Any(form => form.Visible))
+                if (menusClosed)
                 {
                     if (bowl.Visible) Native.SetWindowPos(bowl.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                     foreach (var cat in cats) Native.SetWindowPos(cat.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+                    if (spineDragon.ActiveCat >= 0)
+                        Native.SetWindowPos(cats[spineDragon.ActiveCat].Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                     if (preview.Visible) Native.SetWindowPos(preview.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+                    if (greeting.Visible) Native.SetWindowPos(greeting.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                 }
                 nextStatus = now + 1;
             }
@@ -201,6 +230,8 @@ namespace ThreeCats
             CancelDrag();
             if (Visible)
             {
+                greeting.Stop();
+                spineDragon.Cancel();
                 daily.Paused = true;
                 bowl.Hide();
                 foreach (var cat in cats) cat.Hide();
@@ -229,7 +260,7 @@ namespace ThreeCats
         public void ResizePet(int requestedWidth)
         {
             CancelDrag();
-            StopRoutine();
+            StopActions();
             layout.Resize(requestedWidth);
             FitToScreen();
             SaveSettings();
@@ -279,10 +310,12 @@ namespace ThreeCats
             foreach (var cat in cats)
             {
                 bool active = daily.ActiveCat == cat.CatId;
+                bool dragon = spineDragon.ActiveCat == cat.CatId;
                 Point foot = active ? daily.VisualPosition : layout.PositionOf(cat.CatId);
-                if (drag != null && drag.GrabbedRoutine && !drag.Started && object.ReferenceEquals(cat, drag.Window))
+                if (dragon) foot.Offset(spineDragon.Offset);
+                if (drag != null && drag.HasTemporaryOrigin && !drag.Started && object.ReferenceEquals(cat, drag.Window))
                     foot = drag.CatOrigin;
-                cat.Place(foot, layout.Width, active, IsLifted(cat));
+                cat.Place(foot, layout.Width, active || dragon || IsLifted(cat), celebration.Costume);
             }
         }
 
@@ -318,10 +351,30 @@ namespace ThreeCats
             bowl.Hide();
         }
 
+        private void StopActions()
+        {
+            StopRoutine();
+            spineDragon.Cancel();
+        }
+
+        private Point GetSpineDragonHop(int cat)
+        {
+            Point foot = layout.PositionOf(cat);
+            Rectangle bounds = BoundsAt(foot);
+            Rectangle area = Screen.FromPoint(foot).WorkingArea;
+            int margin = layout.Width / 36;
+            int left = bounds.Left - area.Left - margin;
+            int right = area.Right - bounds.Right - margin;
+            int limit = (int)Math.Round(layout.Width * .13);
+            int distance = Math.Min(limit, Math.Max(0, Math.Max(left, right)));
+            int height = Math.Min((int)Math.Round(layout.Width * .07), Math.Max(0, bounds.Top - area.Top + layout.Width / 22));
+            return new Point(right >= left ? distance : -distance, height);
+        }
+
         private void MoveToPrimary()
         {
             CancelDrag();
-            StopRoutine();
+            StopActions();
             var area = Screen.PrimaryScreen.WorkingArea;
             Point offset = SpriteRenderer.CatFootOffset(layout.Width);
             layout.MoveQueue(new Point(area.Right - QueueBounds().Width - 24 + offset.X, area.Bottom - 12 - (SpriteRenderer.CatFrameSize(layout.Width).Height - offset.Y)));
@@ -333,7 +386,7 @@ namespace ThreeCats
         private void DisplayChanged(object sender, EventArgs args)
         {
             if (IsDisposed || !IsHandleCreated) return;
-            try { BeginInvoke((Action)delegate { CancelDrag(); StopRoutine(); FitToScreen(); SaveSettings(); }); }
+            try { BeginInvoke((Action)delegate { CancelDrag(); StopActions(); FitToScreen(); SaveSettings(); }); }
             catch (InvalidOperationException) { }
         }
 
@@ -348,6 +401,23 @@ namespace ThreeCats
                     motion.Update(0, 1);
                     SaveSettings();
                 }
+        }
+
+        private void UpdateCelebration(double now, bool allowGreeting)
+        {
+            DateTime date = localDate().Date;
+            if (date != currentDate)
+            {
+                currentDate = date;
+                celebration = CelebrationCalendar.Describe(date);
+                greeting.Stop();
+            }
+            if (!allowGreeting || celebration.Message == null
+                || !seenGreetingDates.Add(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))) return;
+            greeting.Play(celebration, now);
+            nextStatus = 0;
+            settings.SeenGreetingDates = seenGreetingDates.OrderBy(key => key, StringComparer.Ordinal).ToArray();
+            SaveSettings();
         }
 
         private void RefreshAutoStart()
@@ -425,6 +495,18 @@ namespace ThreeCats
             }
         }
 
+        private void CatMouseEnter(object sender, EventArgs e)
+        {
+            if (settings.CursorTheme != "catnip" || !Visible || drag != null || MouseButtons != MouseButtons.None
+                || daily.ActiveCat >= 0 || menu.Visible || OwnedForms.Any(form => form.Visible)) return;
+            int cat = ((CatWindow)sender).CatId;
+            Point hop = GetSpineDragonHop(cat);
+            if (!spineDragon.TryStart(cat, hop.X, hop.Y)) return;
+            lastTime = clock.Elapsed.TotalSeconds;
+            nextStatus = 0;
+            TickAnimation();
+        }
+
         private void CatMouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
@@ -437,8 +519,12 @@ namespace ThreeCats
             CancelDrag();
             bool group = shift && layout.IsJoined(cat.CatId);
             bool grabbedRoutine = daily.ActiveCat == cat.CatId && !group;
+            bool grabbedDragon = spineDragon.ActiveCat == cat.CatId && !group;
+            bool interruptedDragon = spineDragon.ActiveCat >= 0;
             bool interruptedRoutine = grabbedRoutine || (group && daily.ActiveCat >= 0);
             Point origin = grabbedRoutine ? daily.VisualPosition : layout.PositionOf(cat.CatId);
+            if (grabbedDragon) origin.Offset(spineDragon.Offset);
+            spineDragon.Cancel();
             if (grabbedRoutine || group) StopRoutine();
             drag = new CatDrag
             {
@@ -447,11 +533,11 @@ namespace ThreeCats
                 CatOrigin = origin,
                 Snapshot = layout.Copy(),
                 Group = group,
-                GrabbedRoutine = grabbedRoutine,
+                HasTemporaryOrigin = grabbedRoutine || grabbedDragon,
                 InterruptedRoutine = interruptedRoutine
             };
             cat.Capture = true;
-            if (grabbedRoutine) { ApplyLayout(); TickAnimation(); }
+            if (grabbedRoutine || interruptedDragon) TickAnimation();
         }
 
         private void CatMouseMove(object sender, MouseEventArgs e)
@@ -538,6 +624,7 @@ namespace ThreeCats
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             CancelDrag();
+            greeting.Stop();
             cursorSession.Dispose();
             timer.Stop();
             SaveSettings();
@@ -559,6 +646,9 @@ namespace ThreeCats
             {
                 cursorSession.Dispose();
                 if (dailyRenderer != null) dailyRenderer.Dispose();
+                spineDragonRenderer.Dispose();
+                costumeRenderer.Dispose();
+                greeting.Dispose();
                 liftRenderer.Dispose();
                 bowl.Dispose();
                 if (cats != null)

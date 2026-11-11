@@ -131,6 +131,33 @@ namespace ThreeCats
             return new Point((int)Math.Round(groupWidth * 800.0 / 1774), (int)Math.Round(groupWidth * 1450.0 / 1774));
         }
 
+        internal CostumePose GetCostumePose(int cat, int width, DailyRoutine routine, CostumePose idle)
+        {
+            int previous;
+            int next;
+            double mix;
+            Select(routine, out previous, out next, out mix);
+            Point foot = FootOffset(width);
+            Point idleFoot = SpriteRenderer.CatFootOffset(width);
+            idle = idle.InFrame(foot.X - idleFoot.X, foot.Y - idleFoot.Y);
+            bool mirror = routine.Facing < 0 && routine.Kind != RoutineKind.Stretch && routine.Kind != RoutineKind.Roll;
+            CostumePose first = previous < 0 ? idle : ProjectCostume(cat, previous, width, foot, mirror);
+            if (mix == 0 || previous == next) return first;
+            CostumePose second = next < 0 ? idle : ProjectCostume(cat, next, width, foot, mirror);
+            return CostumePose.Blend(first, second, mix);
+        }
+
+        private CostumePose ProjectCostume(int cat, int frame, int width, Point foot, bool mirror)
+        {
+            Rectangle box = bounds[cat, frame];
+            double scale = width / 1774.0 * proportions[cat];
+            double baseline = foot.Y + Math.Round((sourceBottom[cat] - 825) * width / 1774.0);
+            double x = mirror ? 256 - box.X - box.Width / 2.0 : box.X + box.Width / 2.0;
+            var target = new RectangleF((float)(foot.X - x * scale), (float)(baseline - box.Bottom * scale),
+                (float)(256 * scale), (float)(256 * scale));
+            return CostumeLandmarks.Daily[cat, frame].Project(target, 216, 216, width, mirror);
+        }
+
         public Bitmap Render(SpriteRenderer idle, int catId, int groupWidth, double horizontal, double vertical, double musicMix, double energy, double time, DailyRoutine routine)
         {
             if (catId < 0 || catId > 2) throw new ArgumentOutOfRangeException("catId");

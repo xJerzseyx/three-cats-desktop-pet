@@ -179,6 +179,7 @@ namespace ThreeCats
         public int Y = int.MinValue;
         public string Players = "cloudmusic,qqmusic";
         public string CursorTheme = "wand";
+        public string[] SeenGreetingDates;
         public int LayoutVersion;
         public int QueueX = int.MinValue;
         public int QueueY = int.MinValue;

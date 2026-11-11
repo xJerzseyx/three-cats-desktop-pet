@@ -12,6 +12,7 @@ using ThreeCats;
 internal static class DailyIntegrationTests
 {
     private static int checks;
+    private static readonly Func<DateTime> OrdinaryDate = () => new DateTime(2026, 11, 12);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);
@@ -95,12 +96,12 @@ internal static class DailyIntegrationTests
         string path = Path.GetFullPath("work/daily-timer-" + Guid.NewGuid().ToString("N") + ".xml");
         new Settings { CursorTheme = "off", Width = 300 }.Save(path);
         var constructor = typeof(PetForm).GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
-            null, new[] { typeof(string), typeof(Random) }, null);
+            null, new[] { typeof(string), typeof(Random), typeof(Func<DateTime>) }, null);
         bool started = false;
         bool completed = false;
         try
         {
-            using (var pet = (PetForm)constructor.Invoke(new object[] { path, new FixedRandom(0, RoutineKind.Stretch) }))
+            using (var pet = (PetForm)constructor.Invoke(new object[] { path, new FixedRandom(0, RoutineKind.Stretch), OrdinaryDate }))
             using (var observer = new System.Windows.Forms.Timer { Interval = 50 })
             {
                 var elapsed = new Stopwatch();
@@ -130,10 +131,10 @@ internal static class DailyIntegrationTests
         string path = Path.GetFullPath("work/daily-integration-" + Guid.NewGuid().ToString("N") + ".xml");
         new Settings { CursorTheme = "off" }.Save(path);
         var constructor = typeof(PetForm).GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
-            null, new[] { typeof(string), typeof(Random) }, null);
+            null, new[] { typeof(string), typeof(Random), typeof(Func<DateTime>) }, null);
         try
         {
-            using (var pet = (PetForm)constructor.Invoke(new object[] { path, new FixedRandom(catId, kind) }))
+            using (var pet = (PetForm)constructor.Invoke(new object[] { path, new FixedRandom(catId, kind), OrdinaryDate }))
             {
                 try
                 {
