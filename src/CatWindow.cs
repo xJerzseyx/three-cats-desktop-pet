@@ -42,23 +42,34 @@ namespace ThreeCats
             if (message.Msg == 0x02E0 && ScreenChanged != null) ScreenChanged();
         }
 
-        internal void Place(Point foot, int groupWidth)
+        internal void Place(Point foot, int groupWidth, bool daily = false, bool lifted = false)
         {
-            Size frameSize = SpriteRenderer.CatFrameSize(groupWidth);
-            Point offset = SpriteRenderer.CatFootOffset(groupWidth);
+            bool expanded = daily || lifted;
+            Size frameSize = expanded ? DailyRenderer.FrameSize(groupWidth) : SpriteRenderer.CatFrameSize(groupWidth);
+            Point offset = expanded ? DailyRenderer.FootOffset(groupWidth) : SpriteRenderer.CatFootOffset(groupWidth);
             var position = new Point(foot.X - offset.X, foot.Y - offset.Y);
             if (Size != frameSize) Size = frameSize;
             if (Location != position) Location = position;
         }
 
-        internal void Animate(Point cursor, int groupWidth, double elapsed, double musicMix, double energy, double time)
+        internal void Animate(Point cursor, int groupWidth, double elapsed, double musicMix, double energy, double time,
+            DailyRoutine routine = null, DailyRenderer dailyRenderer = null, LiftRenderer liftRenderer = null)
         {
             if (!Visible) return;
-            double desiredX = Math.Max(-1, Math.Min(1, (cursor.X - Left - Width / 2.0) / Math.Max(160, groupWidth * 0.55)));
-            double desiredY = Math.Max(-1, Math.Min(1, (cursor.Y - Top - Height * 0.29) / Math.Max(130, Height * 0.8)));
+            bool daily = routine != null && routine.ActiveCat == CatId;
+            Size idleSize = SpriteRenderer.CatFrameSize(groupWidth);
+            Point idleOffset = SpriteRenderer.CatFootOffset(groupWidth);
+            Point offset = daily ? DailyRenderer.FootOffset(groupWidth) : idleOffset;
+            double desiredX = Math.Max(-1, Math.Min(1, (cursor.X - Left - offset.X) / Math.Max(160, groupWidth * 0.55)));
+            double headY = Top + offset.Y - idleOffset.Y + idleSize.Height * 0.29;
+            double desiredY = Math.Max(-1, Math.Min(1, (cursor.Y - headY) / Math.Max(130, idleSize.Height * 0.8)));
             lookX += (desiredX - lookX) * (1 - Math.Exp(-elapsed * 8));
             lookY += (desiredY - lookY) * (1 - Math.Exp(-elapsed * 8));
-            Native.Present(Handle, renderer.RenderCat(CatId, groupWidth, lookX, lookY, musicMix, energy, time), Location);
+            Bitmap frame;
+            if (liftRenderer != null) frame = liftRenderer.Render(CatId, groupWidth);
+            else if (daily) frame = dailyRenderer.Render(renderer, CatId, groupWidth, lookX, lookY, musicMix, energy, time, routine);
+            else frame = renderer.RenderCat(CatId, groupWidth, lookX, lookY, musicMix, energy, time);
+            Native.Present(Handle, frame, Location);
         }
 
         protected override void Dispose(bool disposing)

@@ -23,8 +23,6 @@ static class CursorTests
                 "Arrow", "Help", "AppStarting", "Wait", "Crosshair", "IBeam", "NWPen", "No",
                 "SizeNS", "SizeWE", "SizeNWSE", "SizeNESW", "SizeAll", "UpArrow", "Hand", "Pin", "Person"
             };
-            foreach (string theme in new[] { "wand", "treat", "catnip" })
-                CheckThinIBeam(Path.Combine(directory, theme, "IBeam.cur"));
             int loaded = 0;
             foreach (string theme in new[] { "wand", "treat", "catnip" })
                 foreach (string role in roles)
@@ -37,7 +35,11 @@ static class CursorTests
                     loaded++;
                 }
             Console.WriteLine("PASS Windows loaded all " + loaded + " cursor assets");
-            if (args.Length > 0) CheckRegistry(Path.Combine(directory, "wand"), Path.Combine(directory, "catnip"));
+            if (args.Length > 0)
+            {
+                CheckRegistry(Path.Combine(directory, "wand"), Path.Combine(directory, "catnip"));
+                CheckSystemTextCursor(directory);
+            }
             return 0;
         }
         catch (Exception exception)
@@ -48,32 +50,35 @@ static class CursorTests
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
-    private static void CheckThinIBeam(string file)
+    private static void CheckSystemTextCursor(string directory)
     {
-        byte[] data = File.ReadAllBytes(file);
-        if (BitConverter.ToUInt16(data, 2) != 2 || BitConverter.ToUInt16(data, 4) != 3)
-            throw new Exception("Invalid IBeam directory " + file);
-        for (int entry = 0; entry < 3; entry++)
+        string path = @"Software\ThreeCats.TextCursorTests-" + Guid.NewGuid().ToString("N");
+        using (var key = Registry.CurrentUser.CreateSubKey(path))
+        try
         {
-            int size = new[] { 32, 48, 64 }[entry];
-            int directory = 6 + entry * 16;
-            int offset = BitConverter.ToInt32(data, directory + 12);
-            if (data[directory] != size || data[directory + 1] != size ||
-                BitConverter.ToUInt16(data, directory + 4) != size / 2 ||
-                BitConverter.ToUInt16(data, directory + 6) != size / 2 ||
-                BitConverter.ToInt32(data, offset) != 40 ||
-                BitConverter.ToInt32(data, offset + 4) != size ||
-                BitConverter.ToInt32(data, offset + 8) != size * 2 ||
-                BitConverter.ToUInt16(data, offset + 14) != 32)
-                throw new Exception("Invalid IBeam image or hotspot " + file);
-            int visible = 0;
-            for (int x = 0; x < size; x++)
-                if (data[offset + 40 + ((size / 2) * size + x) * 4 + 3] > 128) visible++;
-            int maximum = size == 64 ? 3 : 2;
-            if (visible < 1 || visible > maximum)
-                throw new Exception("IBeam stem must be thin at " + size + "px, got " + visible + " in " + file);
+            foreach (string original in new[] { null, "", @"%SystemRoot%\cursors\custom-text.cur" })
+            {
+                key.DeleteValue("IBeam", false);
+                RegistryValueKind kind = string.IsNullOrEmpty(original) ? RegistryValueKind.String : RegistryValueKind.ExpandString;
+                if (original != null) key.SetValue("IBeam", original, kind);
+                int reloads = 0;
+                var scheme = new CursorScheme(path, delegate
+                {
+                    reloads++;
+                    object actual = key.GetValue("IBeam", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    if (!object.Equals(actual, original) || (original != null && key.GetValueKind("IBeam") != kind))
+                        throw new Exception("Applying a theme changed the system text cursor.");
+                }, delegate { });
+                foreach (string theme in new[] { "wand", "treat", "catnip" })
+                {
+                    scheme.Apply(Path.Combine(directory, theme));
+                    scheme.Restore();
+                }
+                if (reloads != 6) throw new Exception("Missing system text cursor reload checks.");
+            }
+            Console.WriteLine("PASS all themes use the system text cursor with missing, empty and custom settings");
         }
-        Console.WriteLine("PASS thin IBeam sizes and hotspots " + file);
+        finally { Registry.CurrentUser.DeleteSubKeyTree(path); }
     }
 
     private static void CheckRegistry(string first, string second)

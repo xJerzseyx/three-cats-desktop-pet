@@ -61,29 +61,31 @@ namespace ThreeCats
 
         internal void Apply(string directory)
         {
-            var paths = new string[Roles.Length];
-            var originals = new object[Roles.Length];
-            var kinds = new RegistryValueKind[Roles.Length];
-            for (int i = 0; i < Roles.Length; i++)
+            // Text selection uses the user's saved Windows cursor scheme.
+            string[] roles = Array.FindAll(Roles, role => role != "IBeam");
+            var paths = new string[roles.Length];
+            var originals = new object[roles.Length];
+            var kinds = new RegistryValueKind[roles.Length];
+            for (int i = 0; i < roles.Length; i++)
             {
-                paths[i] = Path.Combine(directory, AssetName(Roles[i]));
+                paths[i] = Path.Combine(directory, AssetName(roles[i]));
                 if (!File.Exists(paths[i])) throw new FileNotFoundException("Missing cursor asset.", paths[i]);
             }
 
             using (var key = Registry.CurrentUser.OpenSubKey(registryPath, true))
             {
                 if (key == null) throw new IOException("The current user's cursor settings could not be opened.");
-                for (int i = 0; i < Roles.Length; i++)
+                for (int i = 0; i < roles.Length; i++)
                 {
-                    originals[i] = Read(key, Roles[i]);
-                    if (originals[i] != null) kinds[i] = key.GetValueKind(Roles[i]);
+                    originals[i] = Read(key, roles[i]);
+                    if (originals[i] != null) kinds[i] = key.GetValueKind(roles[i]);
                 }
 
                 int written = 0;
                 try
                 {
-                    for (; written < Roles.Length; written++)
-                        key.SetValue(Roles[written], paths[written], RegistryValueKind.String);
+                    for (; written < roles.Length; written++)
+                        key.SetValue(roles[written], paths[written], RegistryValueKind.String);
                     active = true;
                     reload();
                     applyPerson(Path.Combine(directory, "Person.cur"));
@@ -94,9 +96,9 @@ namespace ThreeCats
                     // keeping the active cursor images until the next reload.
                     for (int i = 0; i < written; i++)
                     {
-                        if (!object.Equals(Read(key, Roles[i]), paths[i])) continue;
-                        if (originals[i] == null) key.DeleteValue(Roles[i], false);
-                        else key.SetValue(Roles[i], originals[i], kinds[i]);
+                        if (!object.Equals(Read(key, roles[i]), paths[i])) continue;
+                        if (originals[i] == null) key.DeleteValue(roles[i], false);
+                        else key.SetValue(roles[i], originals[i], kinds[i]);
                     }
                 }
             }

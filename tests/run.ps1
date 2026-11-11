@@ -15,6 +15,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Renderer test compilation failed.' }
     & (Join-Path $testDirectory 'RendererTests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Renderer tests failed.' }
+    foreach ($dailyTest in @('DailyRoutineTests', 'DailyRendererTests', 'LiftRendererTests', 'DailyIntegrationTests')) {
+        & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/$dailyTest.exe" /r:System.Drawing.dll /r:System.Windows.Forms.dll "/r:$testDirectory/伊二三万.exe" (Join-Path $PSScriptRoot ($dailyTest + '.cs'))
+        if ($LASTEXITCODE -ne 0) { throw "$dailyTest compilation failed." }
+        & (Join-Path $testDirectory ($dailyTest + '.exe'))
+        if ($LASTEXITCODE -ne 0) { throw "$dailyTest failed." }
+    }
     & $compiler /nologo /utf8output /target:exe /platform:x64 "/out:$testDirectory/AllowAudio.exe" (Join-Path $PSScriptRoot 'AudioTone.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Audio fixture compilation failed.' }
     Copy-Item -LiteralPath (Join-Path $testDirectory 'AllowAudio.exe') -Destination (Join-Path $testDirectory 'IgnoreAudio.exe')

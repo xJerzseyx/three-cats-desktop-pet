@@ -14,6 +14,10 @@ namespace ThreeCats
         private readonly string settingsPath;
         private readonly CatWindow[] cats;
         private readonly CatLayout layout;
+        private readonly DailyRoutine daily;
+        private readonly DailyRenderer dailyRenderer;
+        private readonly LiftRenderer liftRenderer = new LiftRenderer();
+        private readonly BowlWindow bowl = new BowlWindow();
         private readonly QueuePreview preview = new QueuePreview();
         private readonly AudioMonitor audio = new AudioMonitor();
         private readonly MotionState motion = new MotionState();
@@ -32,20 +36,28 @@ namespace ThreeCats
         private double nextStatus;
         private CatDrag drag;
         private bool saveWarningShown;
+        private static readonly string[] routineNames = { "", "伸懒腰", "打滚", "喝水", "吃饭" };
         internal static readonly uint ShowMessage = Native.RegisterWindowMessage("ThreeCatsDesktop.Show.v1");
 
         private sealed class CatDrag
         {
             internal CatWindow Window;
             internal Point Origin;
+            internal Point CatOrigin;
             internal CatLayout Snapshot;
+            internal bool GrabbedRoutine;
+            internal bool InterruptedRoutine;
             internal bool Group;
             internal bool Started;
             internal bool CanReturn;
         }
 
-        public PetForm(string configPath) : base(0)
+        public PetForm(string configPath) : this(configPath, new Random()) { }
+
+        internal PetForm(string configPath, Random random) : base(0)
         {
+            daily = new DailyRoutine(random);
+            dailyRenderer = new DailyRenderer();
             settingsPath = configPath;
             settings = Settings.Load(configPath);
             audio.Selected = PlayerNames.Parse(settings.Players);
@@ -64,7 +76,7 @@ namespace ThreeCats
                 cat.MouseUp += CatMouseUp;
                 cat.MouseCaptureChanged += CatCaptureChanged;
                 cat.MouseWheel += CatMouseWheel;
-                cat.ScreenChanged += delegate { CancelDrag(); FitToScreen(); };
+                cat.ScreenChanged += delegate { CancelDrag(); StopRoutine(); FitToScreen(); };
             }
             FitToScreen();
             status = new ToolStripMenuItem("正在检测音乐…") { Enabled = false };
@@ -105,10 +117,12 @@ namespace ThreeCats
             timer.Tick += delegate { TickAnimation(); };
             Shown += delegate
             {
-                foreach (var cat in cats.Skip(1)) cat.Show();
                 SelectCursor(settings.CursorTheme == "off" || CursorScheme.IsTheme(settings.CursorTheme)
                     ? settings.CursorTheme : "wand", false);
                 lastTime = clock.Elapsed.TotalSeconds;
+                // Shown can be dispatched after an immediate hide request.
+                if (!Visible) return;
+                foreach (var cat in cats.Skip(1)) cat.Show();
                 timer.Start();
                 TickAnimation();
             };
@@ -155,16 +169,26 @@ namespace ThreeCats
             if (drag != null && (Native.GetAsyncKeyState(0x1b) & 0x8000) != 0) CancelDrag();
             motion.Update(audio.ReadPeak(), elapsed);
             musicMix += ((motion.Playing ? 1 : 0) - musicMix) * (1 - Math.Exp(-elapsed * 9));
+            daily.Update(elapsed, layout, GetBowlPosition(), drag == null && !menu.Visible && !OwnedForms.Any(form => form.Visible));
             var cursor = Cursor.Position;
             ApplyLayout();
-            foreach (var cat in cats) cat.Animate(cursor, layout.Width, elapsed, musicMix, motion.Energy, now);
+            foreach (var cat in cats)
+                cat.Animate(cursor, layout.Width, elapsed, musicMix, motion.Energy, now, daily, dailyRenderer, IsLifted(cat) ? liftRenderer : null);
+            if (daily.BowlVisible)
+            {
+                bowl.ShowMeal(daily.Kind, daily.BowlPosition, layout.Width);
+                Native.SetWindowPos(bowl.Handle, cats[daily.ActiveCat].Handle, 0, 0, 0, 0, 0x0013);
+            }
+            else bowl.Hide();
             if (drag != null && drag.Started && !drag.Group)
                 preview.ShowTarget(layout, drag.Window.CatId, drag.CanReturn, musicMix, motion.Energy, now);
             if (now > nextStatus)
             {
                 status.Text = !audio.Available ? (audio.Error ?? "等待音频设备") : motion.Playing ? "音乐播放中 · 同步摇摆" : "等待音乐 · 头部跟随鼠标";
+                if (daily.ActiveCat >= 0) status.Text = "猫咪日常 · " + routineNames[(int)daily.Kind];
                 if (!menu.Visible && !OwnedForms.Any(form => form.Visible))
                 {
+                    if (bowl.Visible) Native.SetWindowPos(bowl.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                     foreach (var cat in cats) Native.SetWindowPos(cat.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                     if (preview.Visible) Native.SetWindowPos(preview.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
                 }
@@ -177,6 +201,8 @@ namespace ThreeCats
             CancelDrag();
             if (Visible)
             {
+                daily.Paused = true;
+                bowl.Hide();
                 foreach (var cat in cats) cat.Hide();
                 timer.Stop();
                 audio.Dispose();
@@ -188,6 +214,7 @@ namespace ThreeCats
         public void ShowPet()
         {
             CancelDrag();
+            daily.Paused = false;
             FitToScreen();
             audio.Refresh();
             motion.Update(0, 1);
@@ -202,6 +229,7 @@ namespace ThreeCats
         public void ResizePet(int requestedWidth)
         {
             CancelDrag();
+            StopRoutine();
             layout.Resize(requestedWidth);
             FitToScreen();
             SaveSettings();
@@ -248,12 +276,52 @@ namespace ThreeCats
 
         private void ApplyLayout()
         {
-            foreach (var cat in cats) cat.Place(layout.PositionOf(cat.CatId), layout.Width);
+            foreach (var cat in cats)
+            {
+                bool active = daily.ActiveCat == cat.CatId;
+                Point foot = active ? daily.VisualPosition : layout.PositionOf(cat.CatId);
+                if (drag != null && drag.GrabbedRoutine && !drag.Started && object.ReferenceEquals(cat, drag.Window))
+                    foot = drag.CatOrigin;
+                cat.Place(foot, layout.Width, active, IsLifted(cat));
+            }
+        }
+
+        private bool IsLifted(CatWindow cat)
+        {
+            return drag != null && drag.Started && !drag.Group && object.ReferenceEquals(cat, drag.Window);
+        }
+
+        private Point GetBowlPosition()
+        {
+            Rectangle queue = QueueBounds();
+            Rectangle area = Screen.FromRectangle(queue).WorkingArea;
+            int margin = Math.Max(30, (int)Math.Round(layout.Width * .4));
+            int gap = Math.Max(8, layout.Width / 30);
+            int radius = Math.Max(12, (int)Math.Round(layout.Width * .07));
+            int x = queue.Right + gap + radius;
+            int y = layout.Anchor.Y;
+            if (x + margin > area.Right) x = queue.Left - gap - radius;
+            if (x - margin < area.Left)
+            {
+                x = queue.Left + queue.Width / 2;
+                y = queue.Top - gap;
+            }
+            x = Math.Max(area.Left + margin, Math.Min(x, area.Right - margin));
+            int headroom = SpriteRenderer.CatFrameSize(layout.Width).Height;
+            y = Math.Max(area.Top + headroom, Math.Min(y, area.Bottom - Math.Max(10, layout.Width / 100)));
+            return new Point(x, y);
+        }
+
+        private void StopRoutine()
+        {
+            if (daily.ActiveCat >= 0) daily.Interrupt();
+            bowl.Hide();
         }
 
         private void MoveToPrimary()
         {
             CancelDrag();
+            StopRoutine();
             var area = Screen.PrimaryScreen.WorkingArea;
             Point offset = SpriteRenderer.CatFootOffset(layout.Width);
             layout.MoveQueue(new Point(area.Right - QueueBounds().Width - 24 + offset.X, area.Bottom - 12 - (SpriteRenderer.CatFrameSize(layout.Width).Height - offset.Y)));
@@ -265,7 +333,7 @@ namespace ThreeCats
         private void DisplayChanged(object sender, EventArgs args)
         {
             if (IsDisposed || !IsHandleCreated) return;
-            try { BeginInvoke((Action)delegate { CancelDrag(); FitToScreen(); SaveSettings(); }); }
+            try { BeginInvoke((Action)delegate { CancelDrag(); StopRoutine(); FitToScreen(); SaveSettings(); }); }
             catch (InvalidOperationException) { }
         }
 
@@ -367,14 +435,23 @@ namespace ThreeCats
         private void BeginCatDrag(CatWindow cat, Point pointer, bool shift)
         {
             CancelDrag();
+            bool group = shift && layout.IsJoined(cat.CatId);
+            bool grabbedRoutine = daily.ActiveCat == cat.CatId && !group;
+            bool interruptedRoutine = grabbedRoutine || (group && daily.ActiveCat >= 0);
+            Point origin = grabbedRoutine ? daily.VisualPosition : layout.PositionOf(cat.CatId);
+            if (grabbedRoutine || group) StopRoutine();
             drag = new CatDrag
             {
                 Window = cat,
                 Origin = pointer,
+                CatOrigin = origin,
                 Snapshot = layout.Copy(),
-                Group = shift && layout.IsJoined(cat.CatId)
+                Group = group,
+                GrabbedRoutine = grabbedRoutine,
+                InterruptedRoutine = interruptedRoutine
             };
             cat.Capture = true;
+            if (grabbedRoutine) { ApplyLayout(); TickAnimation(); }
         }
 
         private void CatMouseMove(object sender, MouseEventArgs e)
@@ -399,8 +476,9 @@ namespace ThreeCats
                 layout.MoveQueue(new Point(drag.Snapshot.Anchor.X + dx, drag.Snapshot.Anchor.Y + dy));
             else
             {
-                Point original = drag.Snapshot.PositionOf(drag.Window.CatId);
-                var position = new Point(original.X + dx, original.Y + dy);
+                Point foot = LiftRenderer.FootOffset(layout.Width);
+                Point grip = LiftRenderer.GripOffset(drag.Window.CatId, layout.Width);
+                var position = new Point(pointer.X + foot.X - grip.X, pointer.Y + foot.Y - grip.Y);
                 layout.MoveCat(drag.Window.CatId, position);
                 drag.CanReturn = layout.CanJoin(position);
             }
@@ -424,9 +502,10 @@ namespace ThreeCats
             if (drag == null) return;
             CatDrag completed = drag;
             drag = null;
+            if (completed.InterruptedRoutine) daily.Interrupt();
             completed.Window.Capture = false;
             preview.Hide();
-            if (!completed.Started) return;
+            if (!completed.Started) { ApplyLayout(); TickAnimation(); return; }
             if (!completed.Group && completed.CanReturn) layout.Join(completed.Window.CatId);
             FitToScreen();
             SaveSettings();
@@ -438,6 +517,7 @@ namespace ThreeCats
             if (drag == null) return;
             CatDrag cancelled = drag;
             drag = null;
+            if (cancelled.InterruptedRoutine) daily.Interrupt();
             layout.Restore(cancelled.Snapshot);
             cancelled.Window.Capture = false;
             preview.Hide();
@@ -478,6 +558,9 @@ namespace ThreeCats
             if (disposing)
             {
                 cursorSession.Dispose();
+                if (dailyRenderer != null) dailyRenderer.Dispose();
+                liftRenderer.Dispose();
+                bowl.Dispose();
                 if (cats != null)
                     foreach (var cat in cats.Skip(1)) cat.Dispose();
                 preview.Dispose();

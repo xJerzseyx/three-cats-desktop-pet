@@ -64,11 +64,14 @@ class IntegrationTests
 
     static Point DragCatTo(PetForm pet, CatWindow cat, Point destination)
     {
-        Point foot = Layout(pet).PositionOf(cat.CatId);
         Point start = cat.PointToScreen(new Point(cat.Width / 2, cat.Height / 2));
         Mouse(cat, "OnMouseDown", start);
-        var finish = new Point(start.X + destination.X - foot.X, start.Y + destination.Y - foot.Y);
+        Point foot = LiftRenderer.FootOffset(Layout(pet).Width);
+        Point grip = LiftRenderer.GripOffset(cat.CatId, Layout(pet).Width);
+        var finish = new Point(destination.X + grip.X - foot.X, destination.Y + grip.Y - foot.Y);
         Mouse(cat, "OnMouseMove", finish);
+        Check(cat.Size == LiftRenderer.FrameSize(Layout(pet).Width) && cat.PointToScreen(grip) == finish,
+            "dragging cat " + cat.CatId + " uses the suspended pose with its scruff under the pointer");
         return finish;
     }
     [STAThread]
@@ -181,6 +184,8 @@ class IntegrationTests
             Mouse(cats[1], "OnMouseDown", click);
             Mouse(cats[1], "OnMouseUp", click);
             Check(Layout(pet).Queue.SequenceEqual(new[] { 0, 1, 2 }), "a click within the drag threshold preserves the queue");
+            Check(cats.All(cat => cat.Size == SpriteRenderer.CatFrameSize(Layout(pet).Width)),
+                "a click within the drag threshold keeps every cat standing");
             Point originalLast = Layout(pet).PositionOf(2);
             var detachedFoot = new Point(anchor.X - 250, anchor.Y - 200);
             Point release = DragCatTo(pet, cats[1], detachedFoot);
@@ -194,6 +199,8 @@ class IntegrationTests
             var groupOrigin = new Point(400, 400);
             Invoke(pet, "BeginCatDrag", cats[0], groupOrigin, true);
             Invoke(pet, "UpdateDrag", new Point(420, 370));
+            Check(cats.All(cat => cat.Size == SpriteRenderer.CatFrameSize(Layout(pet).Width)),
+                "Shift dragging keeps the group standing");
             Invoke(pet, "FinishDrag");
             Check(Layout(pet).Anchor == new Point(anchor.X + 20, anchor.Y - 30) && Layout(pet).PositionOf(1) == detachedFoot,
                 "Shift dragging moves the current queue while detached cats remain in place");
@@ -228,7 +235,8 @@ class IntegrationTests
             DragCatTo(pet, cats[1], new Point(anchor.X - 300, anchor.Y - 250));
             cats[1].Capture = false;
             Check(Layout(pet).Queue.SequenceEqual(confirmed.Queue) && Layout(pet).PositionOf(1) == confirmed.PositionOf(1)
-                && !preview.Visible, "capture loss cancels the drag and restores confirmed placement");
+                && !preview.Visible && cats.All(cat => cat.Size == SpriteRenderer.CatFrameSize(Layout(pet).Width)),
+                "capture loss cancels the drag and restores confirmed standing placement");
             pet.ResizePet(720);
             Pump(100);
             Check(Layout(pet).Width == 720 && cats.All(cat => cat.Size == SpriteRenderer.CatFrameSize(720)), "resize applies one common scale to all cat windows");
@@ -275,7 +283,8 @@ class IntegrationTests
         {
             monitor.Refresh();
             Console.WriteLine("Audio available=" + monitor.Available + "; error=" + monitor.Error);
-            Check(monitor.Error == null, "audio session API initializes without an interface error");
+            Check(monitor.Error == null || (!monitor.Available && monitor.Error == "没有可用的音频输出设备"),
+                "audio endpoint enumeration completes without an interface error");
             if (monitor.Available)
             {
                 monitor.Selected = PlayerNames.Parse("allowaudio");
@@ -307,7 +316,11 @@ class IntegrationTests
                     ignored.WaitForExit();
                 }
             }
-            else Console.WriteLine("SKIP live playback tests: no audio endpoint");
+            else
+            {
+                Check(monitor.ReadPeak() == 0, "missing audio endpoint supplies silence");
+                Console.WriteLine("SKIP live playback tests: no audio endpoint");
+            }
         }
         Console.WriteLine(checks + " integration checks passed");
     }
