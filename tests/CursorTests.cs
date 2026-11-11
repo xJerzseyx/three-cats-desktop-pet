@@ -23,6 +23,8 @@ static class CursorTests
                 "Arrow", "Help", "AppStarting", "Wait", "Crosshair", "IBeam", "NWPen", "No",
                 "SizeNS", "SizeWE", "SizeNWSE", "SizeNESW", "SizeAll", "UpArrow", "Hand", "Pin", "Person"
             };
+            foreach (string theme in new[] { "wand", "treat", "catnip" })
+                CheckThinIBeam(Path.Combine(directory, theme, "IBeam.cur"));
             int loaded = 0;
             foreach (string theme in new[] { "wand", "treat", "catnip" })
                 foreach (string role in roles)
@@ -44,6 +46,34 @@ static class CursorTests
             return 1;
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    private static void CheckThinIBeam(string file)
+    {
+        byte[] data = File.ReadAllBytes(file);
+        if (BitConverter.ToUInt16(data, 2) != 2 || BitConverter.ToUInt16(data, 4) != 3)
+            throw new Exception("Invalid IBeam directory " + file);
+        for (int entry = 0; entry < 3; entry++)
+        {
+            int size = new[] { 32, 48, 64 }[entry];
+            int directory = 6 + entry * 16;
+            int offset = BitConverter.ToInt32(data, directory + 12);
+            if (data[directory] != size || data[directory + 1] != size ||
+                BitConverter.ToUInt16(data, directory + 4) != size / 2 ||
+                BitConverter.ToUInt16(data, directory + 6) != size / 2 ||
+                BitConverter.ToInt32(data, offset) != 40 ||
+                BitConverter.ToInt32(data, offset + 4) != size ||
+                BitConverter.ToInt32(data, offset + 8) != size * 2 ||
+                BitConverter.ToUInt16(data, offset + 14) != 32)
+                throw new Exception("Invalid IBeam image or hotspot " + file);
+            int visible = 0;
+            for (int x = 0; x < size; x++)
+                if (data[offset + 40 + ((size / 2) * size + x) * 4 + 3] > 128) visible++;
+            int maximum = size == 64 ? 3 : 2;
+            if (visible < 1 || visible > maximum)
+                throw new Exception("IBeam stem must be thin at " + size + "px, got " + visible + " in " + file);
+        }
+        Console.WriteLine("PASS thin IBeam sizes and hotspots " + file);
     }
 
     private static void CheckRegistry(string first, string second)

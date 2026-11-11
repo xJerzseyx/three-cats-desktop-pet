@@ -57,6 +57,121 @@ namespace ThreeCats
         }
     }
 
+    public sealed class CatPlacement
+    {
+        public int Id;
+        public int X;
+        public int Y;
+    }
+
+    public sealed class CatLayout
+    {
+        private List<int> order = new List<int> { 0, 1, 2 };
+        private readonly Point[] positions = new Point[3];
+        public Point Anchor { get; private set; }
+        public int Width { get; private set; }
+        public int Spacing { get { return Math.Max(1, (int)Math.Round(Width * 520.0 / 1774)); } }
+        public IList<int> Queue { get { return order.AsReadOnly(); } }
+        public Point TailPosition { get { return new Point(Anchor.X + order.Count * Spacing, Anchor.Y); } }
+
+        public CatLayout(Point anchor, int width)
+        {
+            Anchor = anchor;
+            Resize(width);
+        }
+
+        public Point PositionOf(int id) { return positions[id]; }
+        public bool IsJoined(int id) { return order.Contains(id); }
+
+        public void Detach(int id)
+        {
+            if (order.Remove(id)) Reflow();
+        }
+
+        public void MoveCat(int id, Point position)
+        {
+            Detach(id);
+            positions[id] = position;
+        }
+
+        public void Join(int id)
+        {
+            if (order.Contains(id)) return;
+            order.Add(id);
+            Reflow();
+        }
+
+        public void MoveQueue(Point anchor)
+        {
+            Anchor = anchor;
+            Reflow();
+        }
+
+        public void Resize(int width)
+        {
+            Width = Math.Max(240, Math.Min(1600, width));
+            Reflow();
+        }
+
+        public bool CanJoin(Point position)
+        {
+            int halfHeight = Math.Max(24, Width / 5);
+            var target = new Rectangle(Anchor.X - Spacing / 2, Anchor.Y - halfHeight,
+                Spacing * Math.Max(1, order.Count + 1), halfHeight * 2);
+            return target.Contains(position);
+        }
+
+        private void Reflow()
+        {
+            for (int slot = 0; slot < order.Count; slot++)
+                positions[order[slot]] = new Point(Anchor.X + slot * Spacing, Anchor.Y);
+        }
+
+        public CatLayout Copy()
+        {
+            var result = new CatLayout(Anchor, Width);
+            result.Restore(this);
+            return result;
+        }
+
+        public void Restore(CatLayout snapshot)
+        {
+            Anchor = snapshot.Anchor;
+            Width = snapshot.Width;
+            order = new List<int>(snapshot.order);
+            Array.Copy(snapshot.positions, positions, positions.Length);
+        }
+
+        public static CatLayout FromSettings(Settings settings, Point defaultAnchor)
+        {
+            var result = new CatLayout(defaultAnchor, settings.Width);
+            if (settings.LayoutVersion < 1) return result;
+            if (settings.QueueX != int.MinValue && settings.QueueY != int.MinValue)
+                result.Anchor = new Point(settings.QueueX, settings.QueueY);
+            result.order = (settings.Queue ?? new[] { 0, 1, 2 }).Where(id => id >= 0 && id < 3).Distinct().ToList();
+            if (settings.Cats != null)
+                foreach (var cat in settings.Cats.Where(cat => cat != null && cat.Id >= 0 && cat.Id < 3))
+                    result.positions[cat.Id] = new Point(cat.X, cat.Y);
+            result.Reflow();
+            return result;
+        }
+
+        public void WriteTo(Settings settings)
+        {
+            settings.LayoutVersion = 1;
+            settings.Width = Width;
+            settings.QueueX = Anchor.X;
+            settings.QueueY = Anchor.Y;
+            settings.Queue = order.ToArray();
+            settings.Cats = Enumerable.Range(0, 3).Select(id => new CatPlacement
+            {
+                Id = id,
+                X = positions[id].X,
+                Y = positions[id].Y
+            }).ToArray();
+        }
+    }
+
     public sealed class Settings
     {
         public int Width = 300;
@@ -64,6 +179,11 @@ namespace ThreeCats
         public int Y = int.MinValue;
         public string Players = "cloudmusic,qqmusic";
         public string CursorTheme = "wand";
+        public int LayoutVersion;
+        public int QueueX = int.MinValue;
+        public int QueueY = int.MinValue;
+        public int[] Queue;
+        public CatPlacement[] Cats;
 
         public static Settings Load(string path)
         {

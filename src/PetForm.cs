@@ -8,11 +8,13 @@ using System.Windows.Forms;
 
 namespace ThreeCats
 {
-    public sealed class PetForm : Form
+    public sealed class PetForm : CatWindow
     {
         private readonly Settings settings;
         private readonly string settingsPath;
-        private readonly SpriteRenderer renderer = new SpriteRenderer();
+        private readonly CatWindow[] cats;
+        private readonly CatLayout layout;
+        private readonly QueuePreview preview = new QueuePreview();
         private readonly AudioMonitor audio = new AudioMonitor();
         private readonly MotionState motion = new MotionState();
         private readonly Timer timer = new Timer { Interval = 33 };
@@ -25,33 +27,45 @@ namespace ThreeCats
         private readonly ToolStripMenuItem cursorMenu = new ToolStripMenuItem("全局光标");
         private readonly CursorSession cursorSession = new CursorSession();
         private readonly StartupRegistration startup = new StartupRegistration();
-        private readonly double[] lookX = new double[3];
-        private readonly double[] lookY = new double[3];
         private double lastTime;
         private double musicMix;
         private double nextStatus;
-        private bool dragging;
-        private Point dragOrigin;
-        private Point windowOrigin;
+        private CatDrag drag;
         private bool saveWarningShown;
         internal static readonly uint ShowMessage = Native.RegisterWindowMessage("ThreeCatsDesktop.Show.v1");
 
-        public PetForm(string configPath)
+        private sealed class CatDrag
+        {
+            internal CatWindow Window;
+            internal Point Origin;
+            internal CatLayout Snapshot;
+            internal bool Group;
+            internal bool Started;
+            internal bool CanReturn;
+        }
+
+        public PetForm(string configPath) : base(0)
         {
             settingsPath = configPath;
             settings = Settings.Load(configPath);
             audio.Selected = PlayerNames.Parse(settings.Players);
-            Text = Program.AppName;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-            TopMost = true;
-            AutoScaleMode = AutoScaleMode.None;
-            StartPosition = FormStartPosition.Manual;
-            Size = new Size(settings.Width, (int)Math.Round(settings.Width * SpriteRenderer.Aspect));
             var area = Screen.PrimaryScreen.WorkingArea;
-            Location = settings.X == int.MinValue || settings.Y == int.MinValue
-                ? new Point(area.Right - Width - 24, area.Bottom - Height - 12)
+            var legacyLocation = settings.X == int.MinValue || settings.Y == int.MinValue
+                ? new Point(area.Right - settings.Width - 24, area.Bottom - (int)Math.Round(settings.Width * SpriteRenderer.Aspect) - 12)
                 : new Point(settings.X, settings.Y);
+            var initialAnchor = new Point(legacyLocation.X + (int)Math.Round(settings.Width * 393.0 / 1774),
+                legacyLocation.Y + SpriteRenderer.CatFootOffset(settings.Width).Y);
+            layout = CatLayout.FromSettings(settings, initialAnchor);
+            cats = new[] { this, new CatWindow(1), new CatWindow(2) };
+            foreach (var cat in cats)
+            {
+                cat.MouseDown += CatMouseDown;
+                cat.MouseMove += CatMouseMove;
+                cat.MouseUp += CatMouseUp;
+                cat.MouseCaptureChanged += CatCaptureChanged;
+                cat.MouseWheel += CatMouseWheel;
+                cat.ScreenChanged += delegate { CancelDrag(); FitToScreen(); };
+            }
             FitToScreen();
             status = new ToolStripMenuItem("正在检测音乐…") { Enabled = false };
             menu.Items.Add(status);
@@ -65,8 +79,8 @@ namespace ThreeCats
                 sizes.DropDownItems.Add(percent + "%", null, delegate { ResizePet(requestedWidth); });
             }
             sizes.DropDownItems.Add(new ToolStripSeparator());
-            sizes.DropDownItems.Add("放大", null, delegate { ResizePet((int)(Width * 1.12)); });
-            sizes.DropDownItems.Add("缩小", null, delegate { ResizePet((int)(Width / 1.12)); });
+            sizes.DropDownItems.Add("放大", null, delegate { ResizePet((int)(layout.Width * 1.12)); });
+            sizes.DropDownItems.Add("缩小", null, delegate { ResizePet((int)(layout.Width / 1.12)); });
             menu.Items.Add(sizes);
             AddCursorChoice("逗猫棒", "wand");
             AddCursorChoice("猫条", "treat");
@@ -77,52 +91,33 @@ namespace ThreeCats
             menu.Items.Add("音乐来源设置…", null, delegate { ChoosePlayers(); });
             autoStart = new ToolStripMenuItem("开机自启动", null, delegate { ToggleAutoStart(); });
             menu.Items.Add(autoStart);
-            menu.Items.Add("移回主屏幕", null, delegate
-            {
-                var primary = Screen.PrimaryScreen.WorkingArea;
-                Location = new Point(primary.Right - Width - 24, primary.Bottom - Height - 12);
-                FitToScreen();
-                ShowPet();
-                SaveSettings();
-            });
+            menu.Items.Add("移回主屏幕", null, delegate { MoveToPrimary(); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("左键拖动 · 滚轮缩放", null, delegate { }) .Enabled = false;
+            menu.Items.Add("拖单猫 · Shift 拖队伍 · 滚轮缩放", null, delegate { }) .Enabled = false;
             menu.Items.Add("退出程序", null, delegate { Close(); });
+            menu.Opening += delegate { CancelDrag(); };
+            menu.Opened += RaiseMenu;
+            foreach (var item in menu.Items.OfType<ToolStripDropDownItem>().Where(item => item.HasDropDownItems))
+                item.DropDown.Opened += RaiseMenu;
             tray = new NotifyIcon { Text = Program.AppName, Icon = MakeIcon(), ContextMenuStrip = menu, Visible = true };
             tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ToggleVisibility(); };
             RefreshAutoStart();
             timer.Tick += delegate { TickAnimation(); };
             Shown += delegate
             {
+                foreach (var cat in cats.Skip(1)) cat.Show();
                 SelectCursor(settings.CursorTheme == "off" || CursorScheme.IsTheme(settings.CursorTheme)
                     ? settings.CursorTheme : "wand", false);
                 lastTime = clock.Elapsed.TotalSeconds;
                 timer.Start();
+                TickAnimation();
             };
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
-        }
-
-        protected override bool ShowWithoutActivation { get { return true; } }
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                var parameters = base.CreateParams;
-                parameters.ExStyle |= 0x80000 | 0x80 | 0x08000000;
-                return parameters;
-            }
         }
 
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == ShowMessage) { ShowPet(); return; }
-            if (message.Msg == 0x21) { message.Result = new IntPtr(3); return; }
-            if (message.Msg == 0x02E0)
-            {
-                base.WndProc(ref message);
-                FitToScreen();
-                return;
-            }
             base.WndProc(ref message);
         }
 
@@ -145,6 +140,11 @@ namespace ThreeCats
 
         [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
 
+        private static void RaiseMenu(object sender, EventArgs e)
+        {
+            Native.SetWindowPos(((ToolStripDropDown)sender).Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+        }
+
         private void TickAnimation()
         {
             double now = clock.Elapsed.TotalSeconds;
@@ -152,31 +152,32 @@ namespace ThreeCats
             lastTime = now;
             // Hidden pets sleep. Reshowing refreshes the selected audio sessions.
             if (!Visible) return;
+            if (drag != null && (Native.GetAsyncKeyState(0x1b) & 0x8000) != 0) CancelDrag();
             motion.Update(audio.ReadPeak(), elapsed);
             musicMix += ((motion.Playing ? 1 : 0) - musicMix) * (1 - Math.Exp(-elapsed * 9));
             var cursor = Cursor.Position;
-            double[] fractions = { 393.0 / 1774, 904.0 / 1774, 1441.0 / 1774 };
-            for (int cat = 0; cat < 3; cat++)
-            {
-                double desiredX = Math.Max(-1, Math.Min(1, (cursor.X - Left - Width * fractions[cat]) / Math.Max(160.0, Width * 0.55)));
-                double desiredY = Math.Max(-1, Math.Min(1, (cursor.Y - Top - Height * 0.29) / Math.Max(130.0, Height * 0.8)));
-                lookX[cat] += (desiredX - lookX[cat]) * (1 - Math.Exp(-elapsed * 8));
-                lookY[cat] += (desiredY - lookY[cat]) * (1 - Math.Exp(-elapsed * 8));
-            }
-            Native.Present(Handle, renderer.Render(Width, lookX, lookY, musicMix, motion.Energy, now), Location);
+            ApplyLayout();
+            foreach (var cat in cats) cat.Animate(cursor, layout.Width, elapsed, musicMix, motion.Energy, now);
+            if (drag != null && drag.Started && !drag.Group)
+                preview.ShowTarget(layout, drag.Window.CatId, drag.CanReturn, musicMix, motion.Energy, now);
             if (now > nextStatus)
             {
                 status.Text = !audio.Available ? (audio.Error ?? "等待音频设备") : motion.Playing ? "音乐播放中 · 同步摇摆" : "等待音乐 · 头部跟随鼠标";
-                Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+                if (!menu.Visible && !OwnedForms.Any(form => form.Visible))
+                {
+                    foreach (var cat in cats) Native.SetWindowPos(cat.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+                    if (preview.Visible) Native.SetWindowPos(preview.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+                }
                 nextStatus = now + 1;
             }
         }
 
         public void ToggleVisibility()
         {
+            CancelDrag();
             if (Visible)
             {
-                Hide();
+                foreach (var cat in cats) cat.Hide();
                 timer.Stop();
                 audio.Dispose();
                 visibility.Text = "显示桌宠";
@@ -186,11 +187,12 @@ namespace ThreeCats
 
         public void ShowPet()
         {
+            CancelDrag();
             FitToScreen();
             audio.Refresh();
             motion.Update(0, 1);
             musicMix = 0;
-            Show();
+            foreach (var cat in cats) cat.Show();
             visibility.Text = "隐藏桌宠";
             lastTime = clock.Elapsed.TotalSeconds;
             timer.Start();
@@ -199,13 +201,8 @@ namespace ThreeCats
 
         public void ResizePet(int requestedWidth)
         {
-            var area = Screen.FromRectangle(Bounds).WorkingArea;
-            int width = Math.Max(240, Math.Min(1600, requestedWidth));
-            width = Math.Min(width, Math.Min(area.Width, (int)(area.Height / SpriteRenderer.Aspect)));
-            int bottom = Bottom;
-            int center = Left + Width / 2;
-            Size = new Size(width, (int)Math.Round(width * SpriteRenderer.Aspect));
-            Location = new Point(center - Width / 2, bottom - Height);
+            CancelDrag();
+            layout.Resize(requestedWidth);
             FitToScreen();
             SaveSettings();
             if (Visible) TickAnimation();
@@ -214,19 +211,61 @@ namespace ThreeCats
         private void FitToScreen()
         {
             var areas = Screen.AllScreens.Select(screen => screen.WorkingArea).ToArray();
-            var clamped = Placement.Clamp(Bounds, areas);
-            if (clamped.Width != Width || clamped.Height != Height)
+            var queueScreen = Screen.FromRectangle(QueueBounds()).WorkingArea;
+            int maximumWidth = (int)Math.Min(queueScreen.Width * 1774.0 / 1890, areas.Min(area => area.Height) / SpriteRenderer.Aspect);
+            layout.Resize(Math.Min(layout.Width, maximumWidth));
+            ClampLayout(areas);
+            ApplyLayout();
+        }
+
+        private Rectangle BoundsAt(Point foot)
+        {
+            Point offset = SpriteRenderer.CatFootOffset(layout.Width);
+            return new Rectangle(new Point(foot.X - offset.X, foot.Y - offset.Y), SpriteRenderer.CatFrameSize(layout.Width));
+        }
+
+        private Rectangle QueueBounds()
+        {
+            var bounds = BoundsAt(layout.Anchor);
+            int slots = Math.Max(1, layout.Queue.Count);
+            bounds.Width += (slots - 1) * layout.Spacing;
+            return bounds;
+        }
+
+        private void ClampLayout(Rectangle[] areas)
+        {
+            Rectangle queueBounds = QueueBounds();
+            Rectangle clamped = Placement.Clamp(queueBounds, areas);
+            layout.MoveQueue(new Point(layout.Anchor.X + clamped.X - queueBounds.X, layout.Anchor.Y + clamped.Y - queueBounds.Y));
+            foreach (var cat in cats.Where(cat => !layout.IsJoined(cat.CatId)))
             {
-                int width = Math.Min(clamped.Width, (int)(clamped.Height / SpriteRenderer.Aspect));
-                clamped.Size = new Size(width, (int)Math.Round(width * SpriteRenderer.Aspect));
+                Point foot = layout.PositionOf(cat.CatId);
+                Rectangle bounds = BoundsAt(foot);
+                Rectangle placed = Placement.Clamp(bounds, areas);
+                layout.MoveCat(cat.CatId, new Point(foot.X + placed.X - bounds.X, foot.Y + placed.Y - bounds.Y));
             }
-            Bounds = clamped;
+        }
+
+        private void ApplyLayout()
+        {
+            foreach (var cat in cats) cat.Place(layout.PositionOf(cat.CatId), layout.Width);
+        }
+
+        private void MoveToPrimary()
+        {
+            CancelDrag();
+            var area = Screen.PrimaryScreen.WorkingArea;
+            Point offset = SpriteRenderer.CatFootOffset(layout.Width);
+            layout.MoveQueue(new Point(area.Right - QueueBounds().Width - 24 + offset.X, area.Bottom - 12 - (SpriteRenderer.CatFrameSize(layout.Width).Height - offset.Y)));
+            ClampLayout(new[] { area });
+            ShowPet();
+            SaveSettings();
         }
 
         private void DisplayChanged(object sender, EventArgs args)
         {
             if (IsDisposed || !IsHandleCreated) return;
-            try { BeginInvoke((Action)delegate { FitToScreen(); SaveSettings(); }); }
+            try { BeginInvoke((Action)delegate { CancelDrag(); FitToScreen(); SaveSettings(); }); }
             catch (InvalidOperationException) { }
         }
 
@@ -302,9 +341,10 @@ namespace ThreeCats
 
         private void SaveSettings()
         {
-            settings.Width = Width;
-            settings.X = Left;
-            settings.Y = Top;
+            CatLayout confirmed = drag == null ? layout : drag.Snapshot;
+            confirmed.WriteTo(settings);
+            settings.X = confirmed.Anchor.X - (int)Math.Round(confirmed.Width * 393.0 / 1774);
+            settings.Y = confirmed.Anchor.Y - SpriteRenderer.CatFootOffset(confirmed.Width).Y;
             try { settings.Save(settingsPath); }
             catch (Exception exception)
             {
@@ -317,49 +357,107 @@ namespace ThreeCats
             }
         }
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        private void CatMouseDown(object sender, MouseEventArgs e)
         {
-            base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
-            dragging = true;
-            dragOrigin = Cursor.Position;
-            windowOrigin = Location;
-            Capture = true;
+            var cat = (CatWindow)sender;
+            BeginCatDrag(cat, cat.PointToScreen(e.Location), (ModifierKeys & Keys.Shift) != 0);
         }
 
-        protected override void OnMouseMove(MouseEventArgs e)
+        private void BeginCatDrag(CatWindow cat, Point pointer, bool shift)
         {
-            base.OnMouseMove(e);
-            if (dragging) Location = new Point(windowOrigin.X + Cursor.Position.X - dragOrigin.X, windowOrigin.Y + Cursor.Position.Y - dragOrigin.Y);
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            base.OnMouseUp(e);
-            if (dragging)
+            CancelDrag();
+            drag = new CatDrag
             {
-                dragging = false;
-                Capture = false;
-                FitToScreen();
-                SaveSettings();
+                Window = cat,
+                Origin = pointer,
+                Snapshot = layout.Copy(),
+                Group = shift && layout.IsJoined(cat.CatId)
+            };
+            cat.Capture = true;
+        }
+
+        private void CatMouseMove(object sender, MouseEventArgs e)
+        {
+            if (drag == null || !object.ReferenceEquals(sender, drag.Window)) return;
+            UpdateDrag(drag.Window.PointToScreen(e.Location));
+        }
+
+        private void UpdateDrag(Point pointer)
+        {
+            if (drag == null) return;
+            int dx = pointer.X - drag.Origin.X;
+            int dy = pointer.Y - drag.Origin.Y;
+            if (!drag.Started)
+            {
+                Size threshold = SystemInformation.DragSize;
+                if (Math.Abs(dx) < threshold.Width / 2 && Math.Abs(dy) < threshold.Height / 2) return;
+                drag.Started = true;
+                if (!drag.Group) layout.Detach(drag.Window.CatId);
             }
-            if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
+            if (drag.Group)
+                layout.MoveQueue(new Point(drag.Snapshot.Anchor.X + dx, drag.Snapshot.Anchor.Y + dy));
+            else
+            {
+                Point original = drag.Snapshot.PositionOf(drag.Window.CatId);
+                var position = new Point(original.X + dx, original.Y + dy);
+                layout.MoveCat(drag.Window.CatId, position);
+                drag.CanReturn = layout.CanJoin(position);
+            }
+            ApplyLayout();
+            TickAnimation();
         }
 
-        protected override void OnMouseCaptureChanged(EventArgs e)
+        private void CatMouseUp(object sender, MouseEventArgs e)
         {
-            base.OnMouseCaptureChanged(e);
-            if (!Capture && dragging) { dragging = false; FitToScreen(); SaveSettings(); }
+            var cat = (CatWindow)sender;
+            if (e.Button == MouseButtons.Left && drag != null && object.ReferenceEquals(cat, drag.Window))
+            {
+                UpdateDrag(cat.PointToScreen(e.Location));
+                FinishDrag();
+            }
+            if (e.Button == MouseButtons.Right) menu.Show(cat, e.Location);
         }
 
-        protected override void OnMouseWheel(MouseEventArgs e)
+        private void FinishDrag()
         {
-            base.OnMouseWheel(e);
-            ResizePet((int)(Width * Math.Pow(1.12, e.Delta / 120.0)));
+            if (drag == null) return;
+            CatDrag completed = drag;
+            drag = null;
+            completed.Window.Capture = false;
+            preview.Hide();
+            if (!completed.Started) return;
+            if (!completed.Group && completed.CanReturn) layout.Join(completed.Window.CatId);
+            FitToScreen();
+            SaveSettings();
+            TickAnimation();
+        }
+
+        private void CancelDrag()
+        {
+            if (drag == null) return;
+            CatDrag cancelled = drag;
+            drag = null;
+            layout.Restore(cancelled.Snapshot);
+            cancelled.Window.Capture = false;
+            preview.Hide();
+            ApplyLayout();
+            if (Visible) TickAnimation();
+        }
+
+        private void CatCaptureChanged(object sender, EventArgs e)
+        {
+            if (drag != null && object.ReferenceEquals(sender, drag.Window) && !drag.Window.Capture) CancelDrag();
+        }
+
+        private void CatMouseWheel(object sender, MouseEventArgs e)
+        {
+            ResizePet((int)(layout.Width * Math.Pow(1.12, e.Delta / 120.0)));
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            CancelDrag();
             cursorSession.Dispose();
             timer.Stop();
             SaveSettings();
@@ -370,13 +468,20 @@ namespace ThreeCats
             menu.Dispose();
             timer.Dispose();
             audio.Dispose();
-            renderer.Dispose();
+            foreach (var cat in cats.Skip(1)) cat.Close();
+            preview.Dispose();
             base.OnFormClosed(e);
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) cursorSession.Dispose();
+            if (disposing)
+            {
+                cursorSession.Dispose();
+                if (cats != null)
+                    foreach (var cat in cats.Skip(1)) cat.Dispose();
+                preview.Dispose();
+            }
             base.Dispose(disposing);
         }
     }

@@ -21,6 +21,7 @@ namespace ThreeCats
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
         [DllImport("user32.dll")] public static extern uint RegisterWindowMessage(string name);
         [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
@@ -31,7 +32,7 @@ namespace ThreeCats
             SetProcessDPIAware();
         }
 
-        public static void Present(IntPtr window, Bitmap frame, System.Drawing.Point position)
+        public static void Present(IntPtr window, Bitmap frame, System.Drawing.Point position, byte opacity = 255)
         {
             IntPtr screen = GetDC(IntPtr.Zero);
             IntPtr memory = CreateCompatibleDC(screen);
@@ -44,7 +45,7 @@ namespace ThreeCats
                 var destination = new Point(position.X, position.Y);
                 var origin = new Point(0, 0);
                 var size = new Size(frame.Width, frame.Height);
-                var blend = new Blend { Operation = 0, Flags = 0, Alpha = 255, Format = 1 };
+                var blend = new Blend { Operation = 0, Flags = 0, Alpha = opacity, Format = 1 };
                 if (!UpdateLayeredWindow(window, screen, ref destination, ref size, memory, ref origin, 0, ref blend, 2))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
             }

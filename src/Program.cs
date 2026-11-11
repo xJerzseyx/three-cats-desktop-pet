@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle(ThreeCats.Program.AppName)]
 [assembly: AssemblyProduct(ThreeCats.Program.AppName)]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace ThreeCats
 {

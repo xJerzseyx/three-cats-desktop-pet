@@ -36,19 +36,44 @@ namespace ThreeCats
 
         public Bitmap Render(int width, double[] horizontal, double[] vertical, double musicMix, double energy, double time)
         {
-            int height = (int)Math.Round(width * Aspect);
-            if (frame == null || frame.Width != width)
+            return RenderCore(width, (int)Math.Round(width * Aspect), (double)width / sourceWidth, 0, 0, 3, horizontal, vertical, musicMix, energy, time);
+        }
+
+        public static Size CatFrameSize(int groupWidth)
+        {
+            return new Size(Math.Max(1, (int)Math.Ceiling(groupWidth * 850.0 / 1774)), Math.Max(1, (int)Math.Round(groupWidth * Aspect)));
+        }
+
+        public static Point CatFootOffset(int groupWidth)
+        {
+            return new Point((int)Math.Round(groupWidth * 425.0 / 1774), (int)Math.Round(groupWidth * 825.0 / 1774));
+        }
+
+        public Bitmap RenderCat(int cat, int groupWidth, double horizontal, double vertical, double musicMix, double energy, double time)
+        {
+            if (cat < 0 || cat >= 3) throw new ArgumentOutOfRangeException("cat");
+            if (groupWidth < 1) throw new ArgumentOutOfRangeException("groupWidth");
+            Size size = CatFrameSize(groupWidth);
+            double[] gazeX = new double[3], gazeY = new double[3];
+            gazeX[cat] = horizontal;
+            gazeY[cat] = vertical;
+            return RenderCore(size.Width, size.Height, groupWidth / 1774.0, centers[cat] - 425, cat, cat + 1, gazeX, gazeY, musicMix, energy, time);
+        }
+
+        private Bitmap RenderCore(int width, int height, double scale, double originX, int firstCat, int endCat, double[] horizontal, double[] vertical, double musicMix, double energy, double time)
+        {
+            if (frame == null || frame.Width != width || frame.Height != height)
             {
                 if (frame != null) frame.Dispose();
                 frame = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
                 pixels = new int[width * height];
             }
             Array.Clear(pixels, 0, pixels.Length);
-            double scale = (double)width / sourceWidth;
+
             // A continuous inverse warp bends the neck without exposing a layer seam.
             double sway = Math.Sin(time * 3.5) * (0.008 + energy * 0.014) * musicMix;
             double nod = Math.Sin(time * 7.0) * (3 + energy * 13) * musicMix;
-            for (int cat = 0; cat < 3; cat++)
+            for (int cat = firstCat; cat < endCat; cat++)
             {
                 double center = centers[cat];
                 double headAngle = horizontal[cat] * 0.065 * (1 - musicMix)
@@ -57,8 +82,8 @@ namespace ThreeCats
                 double offsetY = vertical[cat] * 9 * (1 - musicMix) + nod;
                 double bodyCos = Math.Cos(sway);
                 double bodySin = Math.Sin(sway);
-                int fromX = Math.Max(0, (int)((edges[cat] - 28) * scale));
-                int toX = Math.Min(width, (int)Math.Ceiling((edges[cat + 1] + 28) * scale));
+                int fromX = Math.Max(0, (int)((edges[cat] - 28 - originX) * scale));
+                int toX = Math.Min(width, (int)Math.Ceiling((edges[cat + 1] + 28 - originX) * scale));
                 for (int y = 0; y < height; y++)
                 {
                     double sourceY = (y + 0.5) / scale;
@@ -68,7 +93,7 @@ namespace ThreeCats
                     double sine = Math.Sin(headAngle * blend);
                     for (int x = fromX; x < toX; x++)
                     {
-                        double dx = (x + 0.5) / scale - center;
+                        double dx = (x + 0.5) / scale + originX - center;
                         double dy = sourceY - 825;
                         double bodyX = center + bodyCos * dx + bodySin * dy;
                         double bodyY = 825 - bodySin * dx + bodyCos * dy;

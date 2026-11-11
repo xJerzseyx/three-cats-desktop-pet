@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework x64 C# compiler was not found.' }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$sourceFiles = @('Model.cs', 'AudioMonitor.cs', 'SpriteRenderer.cs', 'Native.cs', 'StartupRegistration.cs', 'CursorScheme.cs', 'CursorSession.cs', 'PlayerDialog.cs', 'PetForm.cs', 'Program.cs')
+$sourceFiles = @('Model.cs', 'AudioMonitor.cs', 'SpriteRenderer.cs', 'Native.cs', 'StartupRegistration.cs', 'CursorScheme.cs', 'CursorSession.cs', 'PlayerDialog.cs', 'CatWindow.cs', 'PetForm.cs', 'Program.cs')
 $sourcePaths = $sourceFiles | ForEach-Object { Join-Path (Join-Path $PSScriptRoot 'src') $_ }
 $assetPath = Join-Path $PSScriptRoot 'assets/cats.png'
 $cursorPath = Join-Path $PSScriptRoot 'assets/cursors.zip'
